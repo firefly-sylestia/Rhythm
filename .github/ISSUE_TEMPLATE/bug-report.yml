@@ -93,6 +93,4 @@ body:
   - type: textarea
     id: screenshots
     attributes:
-      label: Screenshots
-      options:
-        - label: attach screenshots here if necessary
+      label: Attach screenshots here if necessary.
