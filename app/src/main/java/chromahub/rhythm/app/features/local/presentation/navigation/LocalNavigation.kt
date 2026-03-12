@@ -733,6 +733,7 @@ private fun LocalNavigationContent(
                                 // Clear the current song to hide the mini player
                                 viewModel.clearCurrentSong()
                             },
+                            isMediaLoading = viewModel.isBuffering.collectAsState().value,
                             modifier = Modifier.align(Alignment.BottomEnd) // Align to bottom-end (right side)
                         )
                     }

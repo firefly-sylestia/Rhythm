@@ -201,11 +201,20 @@ fun BatchEditTagsSheet(
                             Toast.makeText(context, "Enable at least one field to edit", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
+                        // Check if at least one enabled field has a non-empty value
+                        val hasValidInput = (editArtist && artist.trim().isNotBlank()) ||
+                                           (editAlbum && album.trim().isNotBlank()) ||
+                                           (editGenre && genre.trim().isNotBlank()) ||
+                                           (editYear && year.toIntOrNull() != null)
+                        if (!hasValidInput) {
+                            Toast.makeText(context, "Please enter a value for at least one enabled field", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
                         isSaving = true
                         onSave(
-                            if (editArtist) artist.trim() else null,
-                            if (editAlbum) album.trim() else null,
-                            if (editGenre) genre.trim() else null,
+                            if (editArtist) artist.trim().takeIf { it.isNotBlank() } else null,
+                            if (editAlbum) album.trim().takeIf { it.isNotBlank() } else null,
+                            if (editGenre) genre.trim().takeIf { it.isNotBlank() } else null,
                             if (editYear) year.toIntOrNull() else null
                         )
                     },

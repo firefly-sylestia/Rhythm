@@ -5382,6 +5382,11 @@ fun ExperimentalFeaturesScreen(onBackClick: () -> Unit) {
     val bitPerfectMode by appSettings.bitPerfectMode.collectAsState()
     val haptic = LocalHapticFeedback.current
     
+    // Third-party integrations states
+    val scrobblingEnabled by appSettings.scrobblingEnabled.collectAsState()
+    val discordRichPresenceEnabled by appSettings.discordRichPresenceEnabled.collectAsState()
+    val broadcastStatusEnabled by appSettings.broadcastStatusEnabled.collectAsState()
+    
     val updaterViewModel: AppUpdaterViewModel = viewModel()
     val latestVersion by updaterViewModel.latestVersion.collectAsState()
 
@@ -5449,6 +5454,36 @@ fun ExperimentalFeaturesScreen(onBackClick: () -> Unit) {
                             context.getString(R.string.exp_test_crash),
                             context.getString(R.string.exp_test_crash_desc),
                             onClick = { chromahub.rhythm.app.util.CrashReporter.testCrash() }
+                        )
+                    )
+                )
+            )
+            
+            // Third-Party Integrations group
+            add(
+                SettingGroup(
+                    title = context.getString(R.string.exp_third_party_integrations),
+                    items = listOf(
+                        SettingItem(
+                            Icons.Default.MusicNote,
+                            context.getString(R.string.scrobbling_enabled),
+                            context.getString(R.string.scrobbling_desc),
+                            toggleState = scrobblingEnabled,
+                            onToggleChange = { appSettings.setScrobblingEnabled(it) }
+                        ),
+                        SettingItem(
+                            Icons.Default.Forum,
+                            context.getString(R.string.discord_enabled),
+                            context.getString(R.string.discord_desc),
+                            toggleState = discordRichPresenceEnabled,
+                            onToggleChange = { appSettings.setDiscordRichPresenceEnabled(it) }
+                        ),
+                        SettingItem(
+                            Icons.Default.Wifi,
+                            context.getString(R.string.broadcast_status_enabled),
+                            context.getString(R.string.broadcast_status_desc),
+                            toggleState = broadcastStatusEnabled,
+                            onToggleChange = { appSettings.setBroadcastStatusEnabled(it) }
                         )
                     )
                 )
@@ -8604,20 +8639,6 @@ fun PlayerCustomizationSettingsScreen(onBackClick: () -> Unit) {
                             toggleState = showLyrics,
                             onToggleChange = { appSettings.setShowLyrics(it) }
                         )
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 20.dp),
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                        )
-                        // Lyrics Source Priority
-                        SettingRow(
-                            icon = Icons.Default.Lyrics,
-                            title = context.getString(R.string.lyrics_source_priority),
-                            description = context.getString(R.string.playback_lyrics_priority_desc),
-                            onClick = {
-                                HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
-                                showLyricsSourceDialog = true
-                            }
-                        )
                         // All lyrics settings visible when lyrics are enabled
                         AnimatedVisibility(
                             visible = showLyrics,
@@ -8625,6 +8646,20 @@ fun PlayerCustomizationSettingsScreen(onBackClick: () -> Unit) {
                             exit = fadeOut(animationSpec = tween(200)) + shrinkVertically(animationSpec = tween(200))
                         ) {
                             Column {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 20.dp),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                                )
+                                // Lyrics Source Priority
+                                SettingRow(
+                                    icon = Icons.Default.Lyrics,
+                                    title = context.getString(R.string.lyrics_source_priority),
+                                    description = context.getString(R.string.playback_lyrics_priority_desc),
+                                    onClick = {
+                                        HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
+                                        showLyricsSourceDialog = true
+                                    }
+                                )
                                 HorizontalDivider(
                                     modifier = Modifier.padding(horizontal = 20.dp),
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
@@ -12529,15 +12564,6 @@ fun ApiManagementSettingsScreen(onBackClick: () -> Unit) {
     val spotifyApiEnabled by appSettings.spotifyApiEnabled.collectAsState()
     val spotifyClientId by appSettings.spotifyClientId.collectAsState()
     val spotifyClientSecret by appSettings.spotifyClientSecret.collectAsState()
-    
-    // Scrobbling state
-    val scrobblingEnabled by appSettings.scrobblingEnabled.collectAsState()
-    
-    // Discord Rich Presence state
-    val discordRichPresenceEnabled by appSettings.discordRichPresenceEnabled.collectAsState()
-    
-    // Broadcast Status state
-    val broadcastStatusEnabled by appSettings.broadcastStatusEnabled.collectAsState()
 
     CollapsibleHeaderScreen(
         title = context.getString(R.string.settings_api_management),
@@ -12690,453 +12716,6 @@ fun ApiManagementSettingsScreen(onBackClick: () -> Unit) {
                             text = context.getString(R.string.external_services_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-            
-            // Scrobbling Section
-            item {
-                Text(
-                    text = context.getString(R.string.scrobbling_title),
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column {
-                        // Scrobbling Toggle
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    appSettings.setScrobblingEnabled(!scrobblingEnabled)
-                                }
-                                .padding(horizontal = 20.dp, vertical = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = context.getString(R.string.scrobbling_enabled),
-                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = context.getString(R.string.scrobbling_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Switch(
-                                checked = scrobblingEnabled,
-                                onCheckedChange = { enabled ->
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    appSettings.setScrobblingEnabled(enabled)
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-            
-            // Scrobbling Info Card
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = context.getString(R.string.scrobbling_info_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
-
-                        Text(
-                            text = context.getString(R.string.scrobbling_info_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.scrobbling_compatible_apps),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.scrobbling_apps_list),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.scrobbling_how_to),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.scrobbling_setup_steps),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                    }
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-            
-            // Discord Rich Presence Section
-            item {
-                Text(
-                    text = context.getString(R.string.discord_title),
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column {
-                        // Discord Rich Presence Toggle
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    appSettings.setDiscordRichPresenceEnabled(!discordRichPresenceEnabled)
-                                }
-                                .padding(horizontal = 20.dp, vertical = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = context.getString(R.string.discord_enabled),
-                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = context.getString(R.string.discord_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Switch(
-                                checked = discordRichPresenceEnabled,
-                                onCheckedChange = { enabled ->
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    appSettings.setDiscordRichPresenceEnabled(enabled)
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-            
-            // Discord Info Card
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = context.getString(R.string.discord_info_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
-
-                        Text(
-                            text = context.getString(R.string.discord_info_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.discord_compatible_apps),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.discord_apps_list),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.discord_how_to),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.discord_setup_steps),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.discord_privacy_note),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.discord_privacy_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                    }
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-            
-            // Broadcast Status Section (Tasker/KWGT)
-            item {
-                Text(
-                    text = context.getString(R.string.broadcast_status_title),
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    appSettings.setBroadcastStatusEnabled(!broadcastStatusEnabled)
-                                }
-                                .padding(horizontal = 20.dp, vertical = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = context.getString(R.string.broadcast_status_enabled),
-                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = context.getString(R.string.broadcast_status_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Switch(
-                                checked = broadcastStatusEnabled,
-                                onCheckedChange = { enabled ->
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    appSettings.setBroadcastStatusEnabled(enabled)
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-            
-            // Broadcast Status Info Card
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = context.getString(R.string.broadcast_status_info_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
-
-                        Text(
-                            text = context.getString(R.string.broadcast_status_info_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.broadcast_compatible_apps),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.broadcast_apps_list),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.broadcast_how_to),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.broadcast_setup_steps),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = context.getString(R.string.broadcast_use_cases),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = context.getString(R.string.broadcast_use_cases_list),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            lineHeight = 20.sp
                         )
                     }
                 }

@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -131,6 +132,7 @@ fun MiniPlayer(
     onSkipNext: () -> Unit,
     onSkipPrevious: () -> Unit = {},
     onDismiss: () -> Unit = {},
+    isMediaLoading: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -782,7 +784,7 @@ fun MiniPlayer(
                             label = "play_scale"
                         )
                         
-                        // Play button with primary color
+                        // Play button with primary color - shows loader when buffering
                         FilledIconButton(
                             onClick = {
                                 HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.LongPress)
@@ -800,11 +802,19 @@ fun MiniPlayer(
                             ),
                             interactionSource = playInteractionSource
                         ) {
-                            Icon(
-                                imageVector = if (isPlaying) RhythmIcons.Pause else RhythmIcons.Play,
-                                contentDescription = null,
-                                modifier = Modifier.size(if (isLargeHeight) 28.dp else 24.dp)
-                            )
+                            if (isMediaLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(if (isLargeHeight) 24.dp else 20.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (isPlaying) RhythmIcons.Pause else RhythmIcons.Play,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(if (isLargeHeight) 28.dp else 24.dp)
+                                )
+                            }
                         }
 
                         // Expressive next button with bouncy animation
@@ -1054,11 +1064,19 @@ fun MiniPlayer(
                                 ),
                                 interactionSource = phonePlayInteractionSource
                             ) {
-                                Icon(
-                                    imageVector = if (isPlaying) RhythmIcons.Pause else RhythmIcons.Play,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    modifier = Modifier.size(if (isCompactHeight) 16.dp else 20.dp)
-                                )
+                                if (isMediaLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(if (isCompactHeight) 14.dp else 18.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = if (isPlaying) RhythmIcons.Pause else RhythmIcons.Play,
+                                        contentDescription = if (isPlaying) "Pause" else "Play",
+                                        modifier = Modifier.size(if (isCompactHeight) 16.dp else 20.dp)
+                                    )
+                                }
                             }
                         }
                     } else {
@@ -1092,11 +1110,19 @@ fun MiniPlayer(
                             ),
                             interactionSource = stdPlayInteractionSource
                         ) {
-                            Icon(
-                                imageVector = if (isPlaying) RhythmIcons.Pause else RhythmIcons.Play,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                modifier = Modifier.size(if (isCompactHeight) 16.dp else 20.dp)
-                            )
+                            if (isMediaLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(if (isCompactHeight) 14.dp else 18.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (isPlaying) RhythmIcons.Pause else RhythmIcons.Play,
+                                    contentDescription = if (isPlaying) "Pause" else "Play",
+                                    modifier = Modifier.size(if (isCompactHeight) 16.dp else 20.dp)
+                                )
+                            }
                         }
                     }
                     

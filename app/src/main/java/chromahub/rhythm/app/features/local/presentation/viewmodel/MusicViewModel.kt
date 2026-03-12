@@ -2939,24 +2939,40 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         
         // Add time since last play started
         val currentTime = System.currentTimeMillis()
-        val additionalTime = currentTime - currentPlaybackStartTime
-        return currentPlaybackAccumulatedTime + additionalTime
+        val additionalTime = (currentTime - currentPlaybackStartTime).coerceAtLeast(0L)
+        val totalTime = currentPlaybackAccumulatedTime + additionalTime
+        
+        // Cap at a reasonable maximum (4 hours) to prevent bugs from causing massive values
+        val maxReasonableDuration = 4 * 60 * 60 * 1000L // 4 hours in milliseconds
+        return totalTime.coerceAtMost(maxReasonableDuration)
     }
     
     /**
      * Start tracking playback time for a new song
+     * Note: We don't set isCurrentlyPlaying here - that's handled by onIsPlayingChanged
+     * to ensure we only track actual playback time, not buffering/loading time
      */
     private fun startPlaybackTracking(songId: String) {
         val now = System.currentTimeMillis()
         currentPlaybackSongId = songId
-        currentPlaybackStartTime = now
         currentPlaybackAccumulatedTime = 0L
-        isCurrentlyPlaying = true
-        Log.d(TAG, "Started playback tracking for song: $songId at $now")
+        
+        // Check if player is actually playing right now
+        val actuallyPlaying = mediaController?.isPlaying == true
+        if (actuallyPlaying) {
+            currentPlaybackStartTime = now
+            isCurrentlyPlaying = true
+            Log.d(TAG, "Started playback tracking for song: $songId at $now (playing)")
+        } else {
+            // Reset start time - will be set when playback actually starts
+            currentPlaybackStartTime = 0L
+            isCurrentlyPlaying = false
+            Log.d(TAG, "Started playback tracking for song: $songId (not playing yet)")
+        }
     }
     
     /**
-     * Resume playback tracking (after pause)
+     * Resume playback tracking (after pause or when playback starts)
      */
     private fun resumePlaybackTracking() {
         if (currentPlaybackSongId != null && !isCurrentlyPlaying) {

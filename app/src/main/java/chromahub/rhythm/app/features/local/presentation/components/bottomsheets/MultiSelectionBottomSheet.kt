@@ -298,45 +298,46 @@ fun MultiSelectionBottomSheet(
                         }
                     }
                     
-                    // Row 5: Add to blacklist
-                    if (onAddToBlacklist != null) {
+                    // Row 5: Blacklist and Edit tags - combined row for smarter layout
+                    if (onAddToBlacklist != null || onBatchEditTags != null) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(modifier = Modifier.fillMaxWidth()) {
-                                SongOptionGridItem(
-                                    icon = Icons.Rounded.Block,
-                                    text = "Add to blacklist",
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    iconColor = MaterialTheme.colorScheme.error,
-                                    onClick = {
-                                        HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-                                        onAddToBlacklist()
-                                        onDismiss()
-                                    }
-                                )
+                            // Calculate weights based on how many items are present
+                            val hasBlacklist = onAddToBlacklist != null
+                            val hasEditTags = onBatchEditTags != null
+                            val itemCount = listOf(hasBlacklist, hasEditTags).count { it }
+                            
+                            if (hasBlacklist) {
+                                Box(modifier = if (itemCount == 1) Modifier.fillMaxWidth() else Modifier.weight(1f)) {
+                                    SongOptionGridItem(
+                                        icon = Icons.Rounded.Block,
+                                        text = "Add to blacklist",
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        iconColor = MaterialTheme.colorScheme.error,
+                                        onClick = {
+                                            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
+                                            onAddToBlacklist()
+                                            onDismiss()
+                                        }
+                                    )
+                                }
                             }
-                        }
-                    }
-                    
-                    // Row 6: Batch edit tags
-                    if (onBatchEditTags != null) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxWidth()) {
-                                SongOptionGridItem(
-                                    icon = Icons.Rounded.Edit,
-                                    text = "Edit tags",
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    iconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    onClick = {
-                                        HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-                                        onBatchEditTags()
-                                    }
-                                )
+                            
+                            if (hasEditTags) {
+                                Box(modifier = if (itemCount == 1) Modifier.fillMaxWidth() else Modifier.weight(1f)) {
+                                    SongOptionGridItem(
+                                        icon = Icons.Rounded.Edit,
+                                        text = "Edit tags",
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        iconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        onClick = {
+                                            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
+                                            onBatchEditTags()
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

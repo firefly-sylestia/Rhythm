@@ -76,6 +76,8 @@ import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.SyncAlt
+import androidx.compose.material3.Switch
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.MoreVert
@@ -134,6 +136,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -668,12 +671,26 @@ fun PlayerScreen(
     val totalTimeFormatted = formatDuration(totalTimeMs, useHoursFormat)
     val scrubTimeFormatted = formatDuration(scrubTimeMs, useHoursFormat)
 
+    // Track previous queue position for slide direction
+    var previousQueuePosition by remember { mutableIntStateOf(queuePosition) }
+    var slideDirection by remember { mutableIntStateOf(0) } // -1 = left (previous), 0 = none, 1 = right (next)
+    
+    // Enhanced track change animation with slide direction
     LaunchedEffect(song?.id) {
-        // Reset animation when song changes
-        showAlbumArt = false
-        delay(100)
-        showAlbumArt = true
-
+        if (song != null) {
+            // Determine slide direction based on queue position change
+            slideDirection = when {
+                queuePosition > previousQueuePosition -> 1  // Going to next track - slide from right
+                queuePosition < previousQueuePosition -> -1 // Going to previous track - slide from left
+                else -> 1 // Default to next direction
+            }
+            previousQueuePosition = queuePosition
+            
+            // Reset animation when song changes with quick exit
+            showAlbumArt = false
+            delay(80) // Brief pause for exit animation
+            showAlbumArt = true
+        }
         // Don't reset lyrics view - preserve user's preference
     }
 
@@ -714,10 +731,10 @@ fun PlayerScreen(
     val albumScale by animateFloatAsState(
         targetValue = if (showAlbumArt) {
             if (showLyricsView) 0.98f else 1f  // Slightly smaller when showing lyrics
-        } else 0.8f,
+        } else 0.85f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
+            stiffness = Spring.StiffnessMedium
         ),
         label = "albumScale"
     )
@@ -735,6 +752,16 @@ fun PlayerScreen(
             stiffness = Spring.StiffnessLow
         ),
         label = "albumAlpha"
+    )
+    
+    // Slide offset for track change animation
+    val albumSlideOffset by animateFloatAsState(
+        targetValue = if (showAlbumArt) 0f else (slideDirection * 60f), // Slide based on direction
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "albumSlideOffset"
     )
 
     // Find which playlist the current song belongs to
@@ -1414,8 +1441,8 @@ fun PlayerScreen(
                                     // Move upward slightly as if collapsing to mini player position
                                     translationY = -swipeProgress * 100f
                                     
-                                    // Apply horizontal translation for track swipe
-                                    translationX = artworkTranslationX
+                                    // Apply horizontal translation for track swipe and track change animation
+                                    translationX = artworkTranslationX + albumSlideOffset
                                 }
                                 // Swipe gestures for changing tracks on artwork
                                 .pointerInput(gesturePlayerSwipeTracks, gestureArtworkDoubleTap) {
@@ -3702,22 +3729,34 @@ fun PlayerScreen(
     }
     
     if (showPlaybackSpeedDialog) {
+        val syncSpeedAndPitch by appSettings.syncSpeedAndPitch.collectAsState()
         PlaybackSpeedDialog(
             currentSpeed = playbackSpeed,
+            syncEnabled = syncSpeedAndPitch,
+            onSyncChange = { appSettings.setSyncSpeedAndPitch(it) },
             onDismiss = { showPlaybackSpeedDialog = false },
             onSave = { speed ->
                 musicViewModel.setPlaybackSpeed(speed)
+                if (syncSpeedAndPitch) {
+                    musicViewModel.setPlaybackPitch(speed)
+                }
                 showPlaybackSpeedDialog = false
             }
         )
     }
     
     if (showPlaybackPitchDialog) {
+        val syncSpeedAndPitch by appSettings.syncSpeedAndPitch.collectAsState()
         PlaybackPitchDialog(
             currentPitch = musicViewModel.playbackPitch.collectAsState().value,
+            syncEnabled = syncSpeedAndPitch,
+            onSyncChange = { appSettings.setSyncSpeedAndPitch(it) },
             onDismiss = { showPlaybackPitchDialog = false },
             onSave = { pitch ->
                 musicViewModel.setPlaybackPitch(pitch)
+                if (syncSpeedAndPitch) {
+                    musicViewModel.setPlaybackSpeed(pitch)
+                }
                 showPlaybackPitchDialog = false
             }
         )
@@ -3838,6 +3877,8 @@ fun PlayerScreen(
 @Composable
 fun PlaybackSpeedDialog(
     currentSpeed: Float,
+    syncEnabled: Boolean = false,
+    onSyncChange: (Boolean) -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (Float) -> Unit
 ) {
@@ -3878,7 +3919,42 @@ fun PlaybackSpeedDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Sync toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SyncAlt,
+                            contentDescription = null,
+                            tint = if (syncEnabled) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = context.getString(R.string.sync_with_pitch),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (syncEnabled) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = syncEnabled,
+                        onCheckedChange = {
+                            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
+                            onSyncChange(it)
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Current speed display
                 Card(
@@ -4017,6 +4093,8 @@ fun PlaybackSpeedDialog(
 @Composable
 fun PlaybackPitchDialog(
     currentPitch: Float,
+    syncEnabled: Boolean = false,
+    onSyncChange: (Boolean) -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (Float) -> Unit
 ) {
@@ -4057,7 +4135,42 @@ fun PlaybackPitchDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Sync toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SyncAlt,
+                            contentDescription = null,
+                            tint = if (syncEnabled) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = context.getString(R.string.sync_with_speed),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (syncEnabled) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = syncEnabled,
+                        onCheckedChange = {
+                            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
+                            onSyncChange(it)
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Current pitch display
                 Card(

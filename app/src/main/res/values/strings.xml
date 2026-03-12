@@ -436,6 +436,8 @@
     <string name="player_speed_label">Speed</string>
     <string name="player_pitch_label">Pitch</string>
     <string name="playback_speed">Playback Speed</string>
+    <string name="sync_with_pitch">Sync with Pitch</string>
+    <string name="sync_with_speed">Sync with Speed</string>
     
     <!-- SearchScreen -->
     <string name="search_filter_results">Filter Results</string>
@@ -2576,6 +2578,7 @@
     <string name="exp_streaming_services">Streaming Services</string>
     <string name="exp_test_crash">Test Crash</string>
     <string name="exp_test_crash_desc">Forcibly crash the app to test crash handling and reporting</string>
+    <string name="exp_third_party_integrations">Third-Party Integrations</string>
     <string name="settings_backup_created">Backup Created Successfully</string>
     <string name="settings_backup_created_body">Your complete Rhythm backup has been created.</string>
     <string name="settings_backup_enabled">Enabled</string>

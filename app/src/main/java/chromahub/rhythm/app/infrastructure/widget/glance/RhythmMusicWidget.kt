@@ -109,9 +109,10 @@ class RhythmMusicWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Exact
     
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val appSettings = chromahub.rhythm.app.shared.data.model.AppSettings.getInstance(context)
+        
         provideContent {
             val prefs = currentState<Preferences>()
-            val appSettings = chromahub.rhythm.app.shared.data.model.AppSettings.getInstance(context)
             val widgetData = getWidgetData(prefs, appSettings)
             val currentSize = LocalSize.current
             GlanceTheme {
@@ -1168,9 +1169,11 @@ class RhythmMusicWidget : GlanceAppWidget() {
         cornerRadius: Dp = 20.dp
     ) {
         val sizingModifier = if (size != null) modifier.size(size) else modifier
+        val placeholderSize = (size ?: 72.dp).times(0.6f).coerceIn(28.dp, 96.dp)
         
         Box(modifier = sizingModifier) {
             if (artworkUri != null) {
+                // Glance Image handles loading errors internally
                 Image(
                     provider = AppWidgetImageProvider(artworkUri),
                     contentDescription = "Album Art",
@@ -1178,24 +1181,28 @@ class RhythmMusicWidget : GlanceAppWidget() {
                     contentScale = ContentScale.Crop
                 )
             } else {
-                // Enhanced placeholder with gradient-like effect
-                val placeholderSize = (size ?: 72.dp).times(0.6f).coerceIn(28.dp, 96.dp)
-                Box(
-                    modifier = GlanceModifier
-                        .fillMaxSize()
-                        .cornerRadius(cornerRadius)
-                        .background(GlanceTheme.colors.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        provider = ImageProvider(R.drawable.ic_music_note),
-                        contentDescription = "Album Art Placeholder",
-                        modifier = GlanceModifier.size(placeholderSize),
-                        contentScale = ContentScale.Fit,
-                        colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimaryContainer)
-                    )
-                }
+                AlbumArtPlaceholder(cornerRadius, placeholderSize)
             }
+        }
+    }
+    
+    @Composable
+    private fun AlbumArtPlaceholder(cornerRadius: Dp, placeholderSize: Dp) {
+        // Enhanced placeholder with gradient-like effect
+        Box(
+            modifier = GlanceModifier
+                .fillMaxSize()
+                .cornerRadius(cornerRadius)
+                .background(GlanceTheme.colors.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                provider = ImageProvider(R.drawable.ic_music_note),
+                contentDescription = "Album Art Placeholder",
+                modifier = GlanceModifier.size(placeholderSize),
+                contentScale = ContentScale.Fit,
+                colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimaryContainer)
+            )
         }
     }
     
@@ -1298,21 +1305,42 @@ class RhythmMusicWidget : GlanceAppWidget() {
     }
     
     private fun getWidgetData(prefs: Preferences, appSettings: chromahub.rhythm.app.shared.data.model.AppSettings): WidgetData {
-        return WidgetData(
-            songTitle = prefs[stringPreferencesKey(KEY_SONG_TITLE)] ?: "Rhythm",
-            artistName = prefs[stringPreferencesKey(KEY_ARTIST_NAME)] ?: "",
-            albumName = prefs[stringPreferencesKey(KEY_ALBUM_NAME)] ?: "",
-            isPlaying = prefs[booleanPreferencesKey(KEY_IS_PLAYING)] ?: false,
-            artworkUri = prefs[stringPreferencesKey(KEY_ARTWORK_URI)]?.let { android.net.Uri.parse(it) },
-            hasPrevious = prefs[booleanPreferencesKey(KEY_HAS_PREVIOUS)] ?: false,
-            hasNext = prefs[booleanPreferencesKey(KEY_HAS_NEXT)] ?: false,
-            isFavorite = prefs[booleanPreferencesKey(KEY_IS_FAVORITE)] ?: false,
-            showAlbumArt = appSettings.widgetShowAlbumArt.value,
-            showArtist = appSettings.widgetShowArtist.value,
-            showAlbum = appSettings.widgetShowAlbum.value,
-            showFavoriteButton = appSettings.widgetShowFavoriteButton.value,
-            cornerRadius = appSettings.widgetCornerRadius.value
-        )
+        return try {
+            WidgetData(
+                songTitle = prefs[stringPreferencesKey(KEY_SONG_TITLE)] ?: "Rhythm",
+                artistName = prefs[stringPreferencesKey(KEY_ARTIST_NAME)] ?: "",
+                albumName = prefs[stringPreferencesKey(KEY_ALBUM_NAME)] ?: "",
+                isPlaying = prefs[booleanPreferencesKey(KEY_IS_PLAYING)] ?: false,
+                artworkUri = prefs[stringPreferencesKey(KEY_ARTWORK_URI)]?.takeIf { it.isNotBlank() }?.let { 
+                    try { 
+                        android.net.Uri.parse(it) 
+                    } catch (e: Exception) { 
+                        null 
+                    } 
+                },
+                hasPrevious = prefs[booleanPreferencesKey(KEY_HAS_PREVIOUS)] ?: false,
+                hasNext = prefs[booleanPreferencesKey(KEY_HAS_NEXT)] ?: false,
+                isFavorite = prefs[booleanPreferencesKey(KEY_IS_FAVORITE)] ?: false,
+                showAlbumArt = try { appSettings.widgetShowAlbumArt.value } catch (e: Exception) { true },
+                showArtist = try { appSettings.widgetShowArtist.value } catch (e: Exception) { true },
+                showAlbum = try { appSettings.widgetShowAlbum.value } catch (e: Exception) { true },
+                showFavoriteButton = try { appSettings.widgetShowFavoriteButton.value } catch (e: Exception) { true },
+                cornerRadius = try { appSettings.widgetCornerRadius.value } catch (e: Exception) { 28 }
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("RhythmMusicWidget", "Error getting widget data", e)
+            // Return default data if anything fails
+            WidgetData(
+                songTitle = "Rhythm",
+                artistName = "",
+                albumName = "",
+                isPlaying = false,
+                artworkUri = null,
+                hasPrevious = false,
+                hasNext = false,
+                isFavorite = false
+            )
+        }
     }
 }
 
