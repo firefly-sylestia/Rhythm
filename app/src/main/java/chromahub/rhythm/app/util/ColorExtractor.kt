@@ -25,6 +25,7 @@ import kotlin.math.roundToInt
  * Stores full Material 3 color scheme for both light and dark themes
  */
 data class ExtractedColors(
+    // Light theme colors
     // Primary colors
     val primary: Int,
     val onPrimary: Int,
@@ -43,7 +44,26 @@ data class ExtractedColors(
     val tertiaryContainer: Int,
     val onTertiaryContainer: Int,
 
-    // Surface colors
+    // Dark theme colors
+    // Primary colors
+    val darkPrimary: Int,
+    val darkOnPrimary: Int,
+    val darkPrimaryContainer: Int,
+    val darkOnPrimaryContainer: Int,
+
+    // Secondary colors
+    val darkSecondary: Int,
+    val darkOnSecondary: Int,
+    val darkSecondaryContainer: Int,
+    val darkOnSecondaryContainer: Int,
+
+    // Tertiary colors
+    val darkTertiary: Int,
+    val darkOnTertiary: Int,
+    val darkTertiaryContainer: Int,
+    val darkOnTertiaryContainer: Int,
+
+    // Surface colors (shared or from dark scheme)
     val surface: Int,
     val onSurface: Int,
     val surfaceVariant: Int,
@@ -212,6 +232,18 @@ object ColorExtractor {
                     onTertiary = grayscaleLight.onTertiary.toArgb(),
                     tertiaryContainer = grayscaleLight.tertiaryContainer.toArgb(),
                     onTertiaryContainer = grayscaleLight.onTertiaryContainer.toArgb(),
+                    darkPrimary = grayscaleDark.primary.toArgb(),
+                    darkOnPrimary = grayscaleDark.onPrimary.toArgb(),
+                    darkPrimaryContainer = grayscaleDark.primaryContainer.toArgb(),
+                    darkOnPrimaryContainer = grayscaleDark.onPrimaryContainer.toArgb(),
+                    darkSecondary = grayscaleDark.secondary.toArgb(),
+                    darkOnSecondary = grayscaleDark.onSecondary.toArgb(),
+                    darkSecondaryContainer = grayscaleDark.secondaryContainer.toArgb(),
+                    darkOnSecondaryContainer = grayscaleDark.onSecondaryContainer.toArgb(),
+                    darkTertiary = grayscaleDark.tertiary.toArgb(),
+                    darkOnTertiary = grayscaleDark.onTertiary.toArgb(),
+                    darkTertiaryContainer = grayscaleDark.tertiaryContainer.toArgb(),
+                    darkOnTertiaryContainer = grayscaleDark.onTertiaryContainer.toArgb(),
                     surface = grayscaleDark.surface.toArgb(), // Use dark surface for better contrast
                     onSurface = grayscaleDark.onSurface.toArgb(),
                     surfaceVariant = grayscaleDark.surfaceVariant.toArgb(),
@@ -231,6 +263,18 @@ object ColorExtractor {
                     onTertiary = lightScheme.onTertiary.toArgb(),
                     tertiaryContainer = lightScheme.tertiaryContainer.toArgb(),
                     onTertiaryContainer = lightScheme.onTertiaryContainer.toArgb(),
+                    darkPrimary = darkScheme.primary.toArgb(),
+                    darkOnPrimary = darkScheme.onPrimary.toArgb(),
+                    darkPrimaryContainer = darkScheme.primaryContainer.toArgb(),
+                    darkOnPrimaryContainer = darkScheme.onPrimaryContainer.toArgb(),
+                    darkSecondary = darkScheme.secondary.toArgb(),
+                    darkOnSecondary = darkScheme.onSecondary.toArgb(),
+                    darkSecondaryContainer = darkScheme.secondaryContainer.toArgb(),
+                    darkOnSecondaryContainer = darkScheme.onSecondaryContainer.toArgb(),
+                    darkTertiary = darkScheme.tertiary.toArgb(),
+                    darkOnTertiary = darkScheme.onTertiary.toArgb(),
+                    darkTertiaryContainer = darkScheme.tertiaryContainer.toArgb(),
+                    darkOnTertiaryContainer = darkScheme.onTertiaryContainer.toArgb(),
                     surface = darkScheme.surface.toArgb(),
                     onSurface = darkScheme.onSurface.toArgb(),
                     surfaceVariant = darkScheme.surfaceVariant.toArgb(),
