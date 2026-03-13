@@ -3753,6 +3753,14 @@ fun AboutScreen(
                             )
 
                             CommunityMember(
+                                name = "Christian",
+                                role = "Collab & Project Booming's Lead Dev",
+                                githubUsername = "mardous",
+                                avatarUrl = "https://github.com/mardous.png",
+                                context = context
+                            )
+
+                            CommunityMember(
                                 name = "theovilardo",
                                 role = "Collab & Project PixelPlayer's Lead Dev",
                                 githubUsername = "theovilardo",
@@ -3761,10 +3769,10 @@ fun AboutScreen(
                             )
 
                             CommunityMember(
-                                name = "nikutow",
-                                role = "Contributor",
-                                githubUsername = "nikutow",
-                                avatarUrl = "https://github.com/nikutow.png",
+                                name = "firefly-sylestia",
+                                role = "Tester",
+                                githubUsername = "firefly-sylestia",
+                                avatarUrl = "https://github.com/firefly-sylestia.png",
                                 context = context
                             )
                         }
@@ -3858,6 +3866,14 @@ fun AboutScreen(
                                 role = "Sponsor",
                                 githubUsername = "HyXeny",
                                 avatarUrl = "https://github.com/HyXeny.png",
+                                context = context
+                            )
+
+                            CommunityMember(
+                                name = "Xiaomiraphealin",
+                                role = "Sponsor",
+                                githubUsername = "Xiaomiraphealin",
+                                avatarUrl = "https://github.com/Xiaomiraphealin.png",
                                 context = context
                             )
                         }
