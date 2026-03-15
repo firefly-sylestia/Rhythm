@@ -20,6 +20,18 @@ interface SongArtistDao {
 
     @Query("SELECT COUNT(DISTINCT s.album) FROM song_artists sa INNER JOIN songs s ON sa.songId = s.id WHERE sa.artistName = :artistName AND sa.groupByAlbumArtist = :groupByAlbumArtist AND s.album IS NOT NULL AND s.album != ''")
     suspend fun getAlbumCountForArtist(artistName: String, groupByAlbumArtist: Boolean): Int
+    
+    // Optimized query to fetch all artists and their counts in a single query to avoid N+1 issue
+    @Query("""
+        SELECT sa.artistName,
+               COUNT(sa.songId) as trackCount,
+               COUNT(DISTINCT s.album) as albumCount
+        FROM song_artists sa
+        LEFT JOIN songs s ON sa.songId = s.id AND s.album IS NOT NULL AND s.album != ''
+        WHERE sa.groupByAlbumArtist = :groupByAlbumArtist
+        GROUP BY sa.artistName
+    """)
+    suspend fun getAggregatedArtists(groupByAlbumArtist: Boolean): List<ArtistAggregatedData>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(songArtists: List<SongArtistEntity>)
@@ -36,3 +48,9 @@ interface SongArtistDao {
         insertAll(songArtists)
     }
 }
+
+data class ArtistAggregatedData(
+    val artistName: String,
+    val trackCount: Int,
+    val albumCount: Int
+)

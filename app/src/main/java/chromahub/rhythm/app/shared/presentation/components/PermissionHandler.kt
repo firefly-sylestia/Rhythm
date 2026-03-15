@@ -147,10 +147,6 @@ fun PermissionHandler(
                 currentOnboardingStep = OnboardingStep.BACKUP_RESTORE // Move to backup/restore step first
             } else {
                 currentOnboardingStep = OnboardingStep.COMPLETE
-                // Show media scan loader only if onboarding was completed but initial media scan hasn't happened yet
-                if (!initialMediaScanCompleted && !showMediaScanLoader) {
-                    showMediaScanLoader = true
-                }
                 onSetIsInitializingApp(true) // Start app initialization
                 val intent = Intent(context, chromahub.rhythm.app.infrastructure.service.MediaPlaybackService::class.java)
                 intent.action = chromahub.rhythm.app.infrastructure.service.MediaPlaybackService.ACTION_INIT_SERVICE
@@ -249,7 +245,7 @@ fun PermissionHandler(
 
         // Show media scan loader only on first launch after onboarding completion
         AnimatedVisibility(
-            visible = showMediaScanLoader,
+            visible = showMediaScanLoader && !isInitializingApp,
             enter = fadeIn(animationSpec = tween(800, easing = androidx.compose.animation.core.EaseOutCubic)),
             exit = fadeOut(animationSpec = tween(800, easing = androidx.compose.animation.core.EaseInCubic))
         ) {

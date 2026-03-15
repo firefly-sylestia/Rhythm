@@ -445,7 +445,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // Include album if it has at least one non-blacklisted song
             filteredSongs.any { song -> song.album == album.title && song.artist == album.artist }
         }
-    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
     private val _artists = MutableStateFlow<List<Artist>>(emptyList())
     val artists: StateFlow<List<Artist>> = _artists.asStateFlow()
@@ -479,7 +479,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
@@ -628,7 +628,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // Audio metadata extraction state
     private val _isExtractingMetadata = MutableStateFlow(false)
     val isExtractingMetadata: StateFlow<Boolean> = _isExtractingMetadata.asStateFlow()
-    
+
     // Combined background processing state - true if ANY background task is running
     val isBackgroundProcessing: StateFlow<Boolean> = combine(
         isMediaScanning,

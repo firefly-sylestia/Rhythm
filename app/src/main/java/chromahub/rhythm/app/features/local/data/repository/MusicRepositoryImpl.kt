@@ -1404,18 +1404,15 @@ class MusicRepository(context: Context) {
      */
     private suspend fun loadArtistsFromRelationships(groupByAlbumArtist: Boolean): List<Artist> = withContext(Dispatchers.IO) {
         try {
-            val artistNames = roomDb.songArtistDao().getArtistNames(groupByAlbumArtist)
+            val aggregatedData = roomDb.songArtistDao().getAggregatedArtists(groupByAlbumArtist)
             val artists = mutableListOf<Artist>()
 
-            for (artistName in artistNames) {
-                val trackCount = roomDb.songArtistDao().getTrackCountForArtist(artistName, groupByAlbumArtist)
-                val albumCount = roomDb.songArtistDao().getAlbumCountForArtist(artistName, groupByAlbumArtist)
-
+            for (data in aggregatedData) {
                 val artist = Artist(
-                    id = if (groupByAlbumArtist) "album_artist_${artistName.hashCode()}" else "track_artist_${artistName.hashCode()}",
-                    name = artistName,
-                    numberOfAlbums = albumCount,
-                    numberOfTracks = trackCount
+                    id = if (groupByAlbumArtist) "album_artist_${data.artistName.hashCode()}" else "track_artist_${data.artistName.hashCode()}",
+                    name = data.artistName,
+                    numberOfAlbums = data.albumCount,
+                    numberOfTracks = data.trackCount
                 )
                 artists.add(artist)
             }
@@ -1534,6 +1531,9 @@ class MusicRepository(context: Context) {
         artists
     }
     
+    private var cachedDelimitersString: String? = null
+    private var cachedDelimitersList: List<String> = emptyList()
+
     /**
      * Splits artist names on common collaboration separators.
      * Returns a list of individual artist names.
@@ -1543,8 +1543,14 @@ class MusicRepository(context: Context) {
         // Character-level delimiters from artist separator settings
         val appSettings = AppSettings.getInstance(context)
         val artistSeparatorEnabled = appSettings.artistSeparatorEnabled.value
+        
         val charDelimiters = if (artistSeparatorEnabled) {
-            appSettings.artistSeparatorDelimiters.value.toList().map { it.toString() }
+            val currentDelimitersStr = appSettings.artistSeparatorDelimiters.value
+            if (cachedDelimitersString != currentDelimitersStr) {
+                cachedDelimitersString = currentDelimitersStr
+                cachedDelimitersList = currentDelimitersStr.map { it.toString() }
+            }
+            cachedDelimitersList
         } else {
             emptyList()
         }
@@ -4333,8 +4339,15 @@ class MusicRepository(context: Context) {
                                 Log.e(TAG, "Failed to cache genre for song ID $songId", e)
                             }
                         } else {
-                            // Keep the original song if no valid genre was found
-                            updatedSongs.add(song)
+                            // Cache sentinel genre "-" to avoid infinite retries on startups
+                            Log.d(TAG, "No genre found for $songId, caching minus sign sentinel")
+                            val updatedSong = song.copy(genre = "-")
+                            updatedSongs.add(updatedSong)
+                            try {
+                                genrePrefs.edit().putString("genre_$songId", "-").apply()
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to cache negative genre sentinel", e)
+                            }
                         }
 
                         processedCount++
@@ -4418,10 +4431,10 @@ class MusicRepository(context: Context) {
                     Log.d(TAG, "Extracted metadata for ${song.title}: codec=${formatInfo.codec}, bitrate=${formatInfo.bitrateKbps}kbps, sampleRate=${formatInfo.sampleRateHz}Hz, channels=${formatInfo.channelCount}, bitDepth=${formatInfo.bitDepth}")
                     
                     val updatedSong = song.copy(
-                        bitrate = if (formatInfo.bitrateKbps > 0) formatInfo.bitrateKbps * 1000 else null,
-                        sampleRate = if (formatInfo.sampleRateHz > 0) formatInfo.sampleRateHz else null,
-                        channels = if (formatInfo.channelCount > 0) formatInfo.channelCount else null,
-                        codec = if (formatInfo.codec != "Unknown") formatInfo.codec else null
+                        bitrate = if (formatInfo.bitrateKbps > 0) formatInfo.bitrateKbps * 1000 else -1,
+                        sampleRate = if (formatInfo.sampleRateHz > 0) formatInfo.sampleRateHz else -1,
+                        channels = if (formatInfo.channelCount > 0) formatInfo.channelCount else -1,
+                        codec = if (formatInfo.codec != "Unknown") formatInfo.codec else "-"
                     )
                     updatedSongs.add(updatedSong)
                     
@@ -4430,7 +4443,9 @@ class MusicRepository(context: Context) {
 
                 } catch (e: Exception) {
                     Log.w(TAG, "Error extracting audio metadata for song ${song.title}", e)
-                    updatedSongs.add(song) // Keep original song on error
+                    // Save sentinels so we don't infinitely retry failed songs in the background on next startup
+                    val failedSong = song.copy(bitrate = -1, sampleRate = -1, channels = -1, codec = "-")
+                    updatedSongs.add(failedSong) // Assign sentinels
                     processedCount++
                     onProgress?.invoke(processedCount, songsWithoutMetadata.size)
                 }

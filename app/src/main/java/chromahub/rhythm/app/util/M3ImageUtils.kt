@@ -47,7 +47,7 @@ object M3ImageUtils {
     ) {
         val context = LocalContext.current
         
-        val imageRequest = remember(data) {
+        val imageRequest = remember(data, context) {
             ImageRequest.Builder(context)
                 .data(data)
                 .crossfade(150)
