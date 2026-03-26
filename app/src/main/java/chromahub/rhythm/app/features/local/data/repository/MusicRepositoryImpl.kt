@@ -618,8 +618,12 @@ class MusicRepository(context: Context) {
                                 seenPaths.add(path)
                             }
 
-                            // Content-based duplicate detection (title+artist+duration)
-                            val contentKey = "${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}|${song.duration}"
+                            // Content-based duplicate detection (title+artist+album+duration)
+                            // Include album identity to avoid collapsing valid same-name tracks
+                            // released on different albums/singles.
+                            val normalizedAlbum = song.album.lowercase().trim()
+                            val normalizedAlbumId = song.albumId.lowercase().trim()
+                            val contentKey = "${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}|$normalizedAlbum|$normalizedAlbumId|${song.duration}"
                             if (seenContentKeys.contains(contentKey)) {
                                 Log.d(TAG, "Skipping content duplicate: ${song.title} by ${song.artist}")
                                 duplicatesFound++
@@ -919,7 +923,13 @@ class MusicRepository(context: Context) {
 
             // Load cached genre if available
             val cachedGenre = try {
-                genrePrefs.getString("genre_$id", null)?.takeIf { it.isNotBlank() }
+                genrePrefs.getString("genre_$id", null)
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotBlank() &&
+                            !it.equals("unknown", ignoreCase = true) &&
+                            it != "-"
+                    }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load cached genre for song ID $id", e)
                 null
@@ -4328,12 +4338,31 @@ class MusicRepository(context: Context) {
                         val contentUri = song.uri
                         val genre = getGenreForSong(context, contentUri, songId.toInt())
 
-                        if (genre != null && genre.isNotBlank() && !genre.equals("unknown", ignoreCase = true)) {
+                        val cacheKey = "genre_$songId"
+                        val existingCachedGenre = try {
+                            genrePrefs.getString(cacheKey, null)
+                                ?.trim()
+                                ?.takeIf {
+                                    it.isNotBlank() &&
+                                        !it.equals("unknown", ignoreCase = true) &&
+                                        it != "-"
+                                }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to read existing genre cache for song ID $songId", e)
+                            null
+                        }
+
+                        if (existingCachedGenre != null) {
+                            // Keep previously cached valid genre (e.g., user-edited) and avoid overwriting it
+                            val updatedSong = song.copy(genre = existingCachedGenre)
+                            updatedSongs.add(updatedSong)
+                            Log.d(TAG, "Keeping existing cached genre '$existingCachedGenre' for song ID $songId")
+                        } else if (genre != null && genre.isNotBlank() && !genre.equals("unknown", ignoreCase = true)) {
                             val updatedSong = song.copy(genre = genre)
                             updatedSongs.add(updatedSong)
                             // Cache the detected genre using async apply() to prevent blocking
                             try {
-                                genrePrefs.edit().putString("genre_$songId", genre).apply()
+                                genrePrefs.edit().putString(cacheKey, genre).apply()
                                 Log.d(TAG, "Detected and cached genre '$genre' for song ID $songId: ${song.title}")
                             } catch (e: Exception) {
                                 Log.e(TAG, "Failed to cache genre for song ID $songId", e)
@@ -4344,7 +4373,7 @@ class MusicRepository(context: Context) {
                             val updatedSong = song.copy(genre = "-")
                             updatedSongs.add(updatedSong)
                             try {
-                                genrePrefs.edit().putString("genre_$songId", "-").apply()
+                                genrePrefs.edit().putString(cacheKey, "-").apply()
                             } catch (e: Exception) {
                                 Log.e(TAG, "Failed to cache negative genre sentinel", e)
                             }

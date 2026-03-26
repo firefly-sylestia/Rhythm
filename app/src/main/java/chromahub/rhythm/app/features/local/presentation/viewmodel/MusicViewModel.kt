@@ -238,17 +238,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // Sync the Liked playlist with the current favorite song IDs
     private suspend fun syncLikedPlaylistWithFavorites(favoriteIds: Set<String>) {
         try {
-            // Get all songs and filter to favorites
-            val allSongs = _songs.value
-            val favoriteSongsList = allSongs.filter { favoriteIds.contains(it.id) }
-            
-            Log.d(TAG, "Syncing Liked playlist: ${favoriteIds.size} favorite IDs, ${favoriteSongsList.size} songs found")
-            
-            // Update the Liked playlist
+            // Update the Liked playlist directory without losing existing custom song order
             _playlists.value = _playlists.value.map { playlist ->
                 if (playlist.id == "1") {
+                    // 1. Keep all existing songs that are STILL in favorites
+                    val existingSongsToKeep = playlist.songs.filter { favoriteIds.contains(it.id) }
+                    
+                    // 2. Find any new favorites that are NOT in the playlist yet
+                    val existingIds = existingSongsToKeep.map { it.id }.toSet()
+                    val newFavoriteIds = favoriteIds.filter { !existingIds.contains(it) }
+                    
+                    // 3. Find the Song objects for these new favorites from the global _songs list
+                    val allSongs = _songs.value
+                    val newSongs = allSongs.filter { newFavoriteIds.contains(it.id) }
+                    
+                    // 4. Append them
+                    val finalSongsList = existingSongsToKeep + newSongs
+                    
+                    Log.d(TAG, "Syncing Liked playlist: kept ${existingSongsToKeep.size}, added ${newSongs.size} new songs")
+                    
                     playlist.copy(
-                        songs = favoriteSongsList,
+                        songs = finalSongsList,
                         dateModified = System.currentTimeMillis()
                     )
                 } else {
@@ -3708,34 +3718,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             }
 
                             withContext(Dispatchers.Main) {
-                                val currentPosition = controller.currentPosition
-
                                 // Disable shuffle mode first
                                 controller.shuffleModeEnabled = false
                                 _isShuffleEnabled.value = false
 
-                                // Clear and rebuild the queue
-                                controller.stop()
-                                controller.clearMediaItems()
-                                controller.addMediaItems(mediaItems)
-                                controller.prepare()
-
-                                // Seek to the current song in the restored queue and resume playback
-                                controller.seekTo(currentSongIndex, currentPosition)
-                                controller.play()
+                                // Replace items seamlessly without stopping playback
+                                controller.replaceMediaItems(0, controller.mediaItemCount, mediaItems)
 
                                 // Update the queue state
                                 _currentQueue.value = Queue(restoredSongs, currentSongIndex)
 
                                 // Save queue to persistence
                                 saveQueueToPersistence()
-
-                                // Clear the pre-shuffle snapshot
-                                preShuffleQueue = emptyList()
-
-                                Log.d(TAG, "Queue restored to original order - ${restoredSongs.size} songs, playing index $currentSongIndex")
                             }
                         }
+
+                        // Clear the pre-shuffle snapshot
+                        preShuffleQueue = emptyList()
+
+                        Log.d(TAG, "Queue restored to original order - ${restoredSongs.size} songs, playing index $currentSongIndex")
                     } else {
                         // Empty queue, just toggle shuffle mode
                         controller.shuffleModeEnabled = false
