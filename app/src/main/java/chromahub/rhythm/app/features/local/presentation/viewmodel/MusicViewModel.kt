@@ -5169,6 +5169,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * Add a song to the queue
      */
     fun addSongToQueue(song: Song) {
+        android.widget.Toast.makeText(getApplication<android.app.Application>().applicationContext, "Added to queue: ${song.title}", android.widget.Toast.LENGTH_SHORT).show()
         Log.d(TAG, "Adding song to queue: ${song.title}")
         
         // Clear any previous error
@@ -5236,6 +5237,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * Add a song to play next (right after the current song in the queue)
      */
     fun playNext(song: Song) {
+        android.widget.Toast.makeText(getApplication<android.app.Application>().applicationContext, "Playing next: ${song.title}", android.widget.Toast.LENGTH_SHORT).show()
         Log.d(TAG, "Adding song to play next: ${song.title}")
         
         // Clear any previous error
