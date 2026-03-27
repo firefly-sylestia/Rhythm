@@ -754,6 +754,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _currentQueue.value = Queue(currentQueueSongs, insertIndex)
                 controller.seekToDefaultPosition(insertIndex)
                 controller.prepare()
+                if (!canStartPlayback("handleQueueActionChoice")) return@let
                 controller.play()
                 
                 _currentSong.value = song
@@ -847,11 +848,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // Resume playback on audio device reconnection (e.g., Bluetooth headphones reconnected)
         viewModelScope.launch {
             audioDeviceManager.deviceReconnected.collect { deviceName ->
-                if (appSettings.resumeOnDeviceReconnect.value && !_isPlaying.value && _currentSong.value != null) {
+                if (
+                    appSettings.resumeOnDeviceReconnect.value &&
+                    !_isPlaying.value &&
+                    _currentSong.value != null &&
+                    !isRhythmGuardTimeoutActive()
+                ) {
                     Log.d(TAG, "Audio device reconnected ($deviceName), resuming playback")
                     mediaController?.play()
                     _isPlaying.value = true
                     startProgressUpdates()
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            appSettings.rhythmGuardTimeoutUntilMs.collect { timeoutUntilMs ->
+                if (timeoutUntilMs > System.currentTimeMillis()) {
+                    enforceRhythmGuardTimeout(reason = "timeout lock updated")
                 }
             }
         }
@@ -2662,6 +2676,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             Log.d(TAG, "Is playing changed: $isPlaying")
+
+            if (isPlaying && isRhythmGuardTimeoutActive()) {
+                enforceRhythmGuardTimeout(reason = "onIsPlayingChanged")
+                return
+            }
             
             // Only update if the value is different to avoid unnecessary UI updates
             if (_isPlaying.value != isPlaying) {
@@ -2851,6 +2870,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             Log.e(TAG, "Invalid queue index: $index (queue size: ${_currentQueue.value.songs.size})")
             return
         }
+
+        if (!canStartPlayback("playSongAtIndex")) {
+            return
+        }
         
         val song = _currentQueue.value.songs[index]
         Log.d(TAG, "Playing song at index $index: ${song.title}")
@@ -2859,11 +2882,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             controller.seekToDefaultPosition(index)
             _currentQueue.value = _currentQueue.value.copy(currentIndex = index)
             _currentSong.value = song
-            _isPlaying.value = true
             _isFavorite.value = _favoriteSongs.value.contains(song.id)
             
             controller.prepare()
             controller.play()
+            _isPlaying.value = true
             startProgressUpdates()
             
             // Track song play for statistics
@@ -2877,6 +2900,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun playSong(song: Song) {
         Log.d(TAG, "Playing song: ${song.title}")
+
+        if (!canStartPlayback("playSong")) {
+            return
+        }
 
         // Clear current lyrics to prevent showing stale lyrics from previous song
         _currentLyrics.value = null
@@ -3393,6 +3420,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playQueue(songs: List<Song>, enableShuffle: Boolean? = null, startIndex: Int = 0) {
         Log.d(TAG, "Playing queue with ${songs.size} songs, shuffle: $enableShuffle, startIndex: $startIndex")
+
+        if (!canStartPlayback("playQueue")) {
+            return
+        }
         
         // Clear current lyrics to prevent showing stale lyrics from previous song
         _currentLyrics.value = null
@@ -3517,6 +3548,28 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // Store pending queue to play when controller becomes available
     private var pendingQueueToPlay: List<Song>? = null
 
+    private fun isRhythmGuardTimeoutActive(nowMs: Long = System.currentTimeMillis()): Boolean {
+        return appSettings.rhythmGuardTimeoutUntilMs.value > nowMs
+    }
+
+    private fun enforceRhythmGuardTimeout(reason: String) {
+        mediaController?.let { controller ->
+            if (controller.isPlaying) {
+                Log.d(TAG, "Rhythm Guard timeout active, forcing pause ($reason)")
+                controller.pause()
+            }
+        }
+        _isPlaying.value = false
+        progressUpdateJob?.cancel()
+    }
+
+    private fun canStartPlayback(action: String): Boolean {
+        if (!isRhythmGuardTimeoutActive()) return true
+        Log.d(TAG, "Blocked playback action '$action' due to active Rhythm Guard timeout")
+        enforceRhythmGuardTimeout(reason = action)
+        return false
+    }
+
     fun togglePlayPause() {
         Log.d(TAG, "Toggle play/pause, current state: ${_isPlaying.value}")
         mediaController?.let { controller ->
@@ -3525,6 +3578,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _isPlaying.value = false
                 progressUpdateJob?.cancel()
             } else {
+                if (!canStartPlayback("togglePlayPause")) return
                 controller.play()
                 _isPlaying.value = true
                 startProgressUpdates()
@@ -3539,6 +3593,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             controller.pause()
             _isPlaying.value = false
             progressUpdateJob?.cancel()
+        }
+    }
+
+    fun resumeMusic() {
+        Log.d(TAG, "Resuming music playback")
+        mediaController?.let { controller ->
+            if (!canStartPlayback("resumeMusic")) return
+            controller.play()
+            _isPlaying.value = true
+            startProgressUpdates()
         }
     }
     

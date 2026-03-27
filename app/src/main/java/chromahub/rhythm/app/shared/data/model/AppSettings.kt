@@ -47,6 +47,29 @@ enum class PlaylistViewType {
     LIST, GRID
 }
 
+data class RhythmAuraPolicyBand(
+    val minAge: Int,
+    val maxAge: Int,
+    val maxVolumeThreshold: Float,
+    val recommendedDailyMinutes: Int,
+    val stopPlaybackOnZeroVolume: Boolean,
+    val enforceHapticFeedback: Boolean
+)
+
+typealias RhythmGuardPolicyBand = RhythmAuraPolicyBand
+
+private val RHYTHM_AURA_POLICY_BANDS = listOf(
+    RhythmAuraPolicyBand(8, 12, 0.50f, 40, true, true),
+    RhythmAuraPolicyBand(13, 15, 0.56f, 55, true, true),
+    RhythmAuraPolicyBand(16, 17, 0.60f, 70, true, true),
+    RhythmAuraPolicyBand(18, 25, 0.68f, 95, false, false),
+    RhythmAuraPolicyBand(26, 40, 0.72f, 120, false, false),
+    RhythmAuraPolicyBand(41, 55, 0.70f, 105, false, false),
+    RhythmAuraPolicyBand(56, 80, 0.65f, 90, true, true)
+)
+
+private val RHYTHM_GUARD_POLICY_BANDS = RHYTHM_AURA_POLICY_BANDS
+
 /**
  * Singleton class to manage all app settings using SharedPreferences
  */
@@ -146,6 +169,36 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_UNIQUE_ARTISTS = "unique_artists"
         private const val KEY_GENRE_PREFERENCES = "genre_preferences"
         private const val KEY_TIME_BASED_PREFERENCES = "time_based_preferences"
+
+        // Rhythm Guard (listening health)
+        private const val KEY_RHYTHM_GUARD_MODE = "rhythm_guard_mode"
+        private const val KEY_RHYTHM_GUARD_AGE = "rhythm_guard_age"
+        private const val KEY_RHYTHM_GUARD_MANUAL_WARNINGS_ENABLED = "rhythm_guard_manual_warnings_enabled"
+        private const val KEY_RHYTHM_GUARD_MANUAL_VOLUME_THRESHOLD = "rhythm_guard_manual_volume_threshold"
+        private const val KEY_RHYTHM_GUARD_LAST_AUTO_APPLIED_AT = "rhythm_guard_last_auto_applied_at"
+        private const val KEY_RHYTHM_GUARD_ALERT_THRESHOLD_MINUTES = "rhythm_guard_alert_threshold_minutes"
+        private const val KEY_RHYTHM_GUARD_WARNING_TIMEOUT_MINUTES = "rhythm_guard_warning_timeout_minutes"
+        private const val KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES = "rhythm_guard_break_resume_minutes"
+        private const val KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS = "rhythm_guard_timeout_until_ms"
+        private const val KEY_RHYTHM_GUARD_TIMEOUT_REASON = "rhythm_guard_timeout_reason"
+
+        // Legacy keys kept for migration compatibility.
+        private const val KEY_RHYTHM_AURA_MODE = "rhythm_aura_mode"
+        private const val KEY_RHYTHM_AURA_AGE = "rhythm_aura_age"
+        private const val KEY_RHYTHM_AURA_MANUAL_WARNINGS_ENABLED = "rhythm_aura_manual_warnings_enabled"
+        private const val KEY_RHYTHM_AURA_MANUAL_VOLUME_THRESHOLD = "rhythm_aura_manual_volume_threshold"
+        private const val KEY_RHYTHM_AURA_LAST_AUTO_APPLIED_AT = "rhythm_aura_last_auto_applied_at"
+
+        const val RHYTHM_GUARD_MODE_OFF = "OFF"
+        const val RHYTHM_GUARD_MODE_AUTO = "AUTO"
+        const val RHYTHM_GUARD_MODE_MANUAL = "MANUAL"
+
+        @Deprecated("Use RHYTHM_GUARD_MODE_OFF")
+        const val RHYTHM_AURA_MODE_OFF = RHYTHM_GUARD_MODE_OFF
+        @Deprecated("Use RHYTHM_GUARD_MODE_AUTO")
+        const val RHYTHM_AURA_MODE_AUTO = RHYTHM_GUARD_MODE_AUTO
+        @Deprecated("Use RHYTHM_GUARD_MODE_MANUAL")
+        const val RHYTHM_AURA_MODE_MANUAL = RHYTHM_GUARD_MODE_MANUAL
         
         // Recently Played
         private const val KEY_RECENTLY_PLAYED = "recently_played"
@@ -838,6 +891,77 @@ class AppSettings private constructor(context: Context) {
     
     private val _songsPlayed = MutableStateFlow(prefs.getInt(KEY_SONGS_PLAYED, 0))
     val songsPlayed: StateFlow<Int> = _songsPlayed.asStateFlow()
+
+    private val _rhythmAuraMode = MutableStateFlow(
+        sanitizeRhythmGuardMode(
+            prefs.getString(
+                KEY_RHYTHM_GUARD_MODE,
+                prefs.getString(KEY_RHYTHM_AURA_MODE, RHYTHM_GUARD_MODE_OFF)
+            )
+        )
+    )
+    val rhythmGuardMode: StateFlow<String> = _rhythmAuraMode.asStateFlow()
+    @Deprecated("Use rhythmGuardMode")
+    val rhythmAuraMode: StateFlow<String> = rhythmGuardMode
+
+    private val _rhythmAuraAge = MutableStateFlow(
+        prefs.getInt(KEY_RHYTHM_GUARD_AGE, prefs.getInt(KEY_RHYTHM_AURA_AGE, 18)).coerceIn(8, 80)
+    )
+    val rhythmGuardAge: StateFlow<Int> = _rhythmAuraAge.asStateFlow()
+    @Deprecated("Use rhythmGuardAge")
+    val rhythmAuraAge: StateFlow<Int> = rhythmGuardAge
+
+    private val _rhythmAuraManualWarningsEnabled = MutableStateFlow(
+        prefs.getBoolean(
+            KEY_RHYTHM_GUARD_MANUAL_WARNINGS_ENABLED,
+            prefs.getBoolean(KEY_RHYTHM_AURA_MANUAL_WARNINGS_ENABLED, true)
+        )
+    )
+    val rhythmGuardManualWarningsEnabled: StateFlow<Boolean> = _rhythmAuraManualWarningsEnabled.asStateFlow()
+    @Deprecated("Use rhythmGuardManualWarningsEnabled")
+    val rhythmAuraManualWarningsEnabled: StateFlow<Boolean> = rhythmGuardManualWarningsEnabled
+
+    private val _rhythmAuraManualVolumeThreshold = MutableStateFlow(
+        prefs.getFloat(
+            KEY_RHYTHM_GUARD_MANUAL_VOLUME_THRESHOLD,
+            prefs.getFloat(KEY_RHYTHM_AURA_MANUAL_VOLUME_THRESHOLD, 0.68f)
+        ).coerceIn(0.40f, 0.95f)
+    )
+    val rhythmGuardManualVolumeThreshold: StateFlow<Float> = _rhythmAuraManualVolumeThreshold.asStateFlow()
+    @Deprecated("Use rhythmGuardManualVolumeThreshold")
+    val rhythmAuraManualVolumeThreshold: StateFlow<Float> = rhythmGuardManualVolumeThreshold
+
+    private val _rhythmAuraLastAutoAppliedAt = MutableStateFlow(
+        safeLong(KEY_RHYTHM_GUARD_LAST_AUTO_APPLIED_AT, safeLong(KEY_RHYTHM_AURA_LAST_AUTO_APPLIED_AT, 0L))
+    )
+    val rhythmGuardLastAutoAppliedAt: StateFlow<Long> = _rhythmAuraLastAutoAppliedAt.asStateFlow()
+    @Deprecated("Use rhythmGuardLastAutoAppliedAt")
+    val rhythmAuraLastAutoAppliedAt: StateFlow<Long> = rhythmGuardLastAutoAppliedAt
+
+    private val _rhythmGuardAlertThresholdMinutes = MutableStateFlow(
+        prefs.getInt(KEY_RHYTHM_GUARD_ALERT_THRESHOLD_MINUTES, -1).coerceIn(-1, 24 * 60)
+    )
+    val rhythmGuardAlertThresholdMinutes: StateFlow<Int> = _rhythmGuardAlertThresholdMinutes.asStateFlow()
+
+    private val _rhythmGuardWarningTimeoutMinutes = MutableStateFlow(
+        prefs.getInt(KEY_RHYTHM_GUARD_WARNING_TIMEOUT_MINUTES, 2).coerceIn(1, 60)
+    )
+    val rhythmGuardWarningTimeoutMinutes: StateFlow<Int> = _rhythmGuardWarningTimeoutMinutes.asStateFlow()
+
+    private val _rhythmGuardBreakResumeMinutes = MutableStateFlow(
+        prefs.getInt(KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES, 15).coerceIn(1, 180)
+    )
+    val rhythmGuardBreakResumeMinutes: StateFlow<Int> = _rhythmGuardBreakResumeMinutes.asStateFlow()
+
+    private val _rhythmGuardTimeoutUntilMs = MutableStateFlow(
+        safeLong(KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS, 0L).coerceAtLeast(0L)
+    )
+    val rhythmGuardTimeoutUntilMs: StateFlow<Long> = _rhythmGuardTimeoutUntilMs.asStateFlow()
+
+    private val _rhythmGuardTimeoutReason = MutableStateFlow(
+        prefs.getString(KEY_RHYTHM_GUARD_TIMEOUT_REASON, null).orEmpty()
+    )
+    val rhythmGuardTimeoutReason: StateFlow<String> = _rhythmGuardTimeoutReason.asStateFlow()
     
     private val _uniqueArtists = MutableStateFlow(prefs.getInt(KEY_UNIQUE_ARTISTS, 0))
     val uniqueArtists: StateFlow<Int> = _uniqueArtists.asStateFlow()
@@ -1832,6 +1956,171 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         prefs.edit().putInt(KEY_SONGS_PLAYED, count).apply()
         _songsPlayed.value = count
     }
+
+    fun setRhythmGuardMode(mode: String) {
+        val normalizedMode = sanitizeRhythmGuardMode(mode)
+        prefs.edit()
+            .putString(KEY_RHYTHM_GUARD_MODE, normalizedMode)
+            .putString(KEY_RHYTHM_AURA_MODE, normalizedMode)
+            .apply()
+        _rhythmAuraMode.value = normalizedMode
+    }
+
+    @Deprecated("Use setRhythmGuardMode")
+    fun setRhythmAuraMode(mode: String) = setRhythmGuardMode(mode)
+
+    fun setRhythmGuardAge(age: Int) {
+        val safeAge = age.coerceIn(8, 80)
+        prefs.edit()
+            .putInt(KEY_RHYTHM_GUARD_AGE, safeAge)
+            .putInt(KEY_RHYTHM_AURA_AGE, safeAge)
+            .apply()
+        _rhythmAuraAge.value = safeAge
+    }
+
+    @Deprecated("Use setRhythmGuardAge")
+    fun setRhythmAuraAge(age: Int) = setRhythmGuardAge(age)
+
+    fun setRhythmGuardManualWarningsEnabled(enabled: Boolean) {
+        prefs.edit()
+            .putBoolean(KEY_RHYTHM_GUARD_MANUAL_WARNINGS_ENABLED, enabled)
+            .putBoolean(KEY_RHYTHM_AURA_MANUAL_WARNINGS_ENABLED, enabled)
+            .apply()
+        _rhythmAuraManualWarningsEnabled.value = enabled
+    }
+
+    @Deprecated("Use setRhythmGuardManualWarningsEnabled")
+    fun setRhythmAuraManualWarningsEnabled(enabled: Boolean) = setRhythmGuardManualWarningsEnabled(enabled)
+
+    fun setRhythmGuardManualVolumeThreshold(threshold: Float) {
+        val safeThreshold = threshold.coerceIn(0.40f, 0.95f)
+        prefs.edit()
+            .putFloat(KEY_RHYTHM_GUARD_MANUAL_VOLUME_THRESHOLD, safeThreshold)
+            .putFloat(KEY_RHYTHM_AURA_MANUAL_VOLUME_THRESHOLD, safeThreshold)
+            .apply()
+        _rhythmAuraManualVolumeThreshold.value = safeThreshold
+    }
+
+    @Deprecated("Use setRhythmGuardManualVolumeThreshold")
+    fun setRhythmAuraManualVolumeThreshold(threshold: Float) = setRhythmGuardManualVolumeThreshold(threshold)
+
+    fun setRhythmGuardLastAutoAppliedAt(timestamp: Long) {
+        prefs.edit()
+            .putLong(KEY_RHYTHM_GUARD_LAST_AUTO_APPLIED_AT, timestamp)
+            .putLong(KEY_RHYTHM_AURA_LAST_AUTO_APPLIED_AT, timestamp)
+            .apply()
+        _rhythmAuraLastAutoAppliedAt.value = timestamp
+    }
+
+    @Deprecated("Use setRhythmGuardLastAutoAppliedAt")
+    fun setRhythmAuraLastAutoAppliedAt(timestamp: Long) = setRhythmGuardLastAutoAppliedAt(timestamp)
+
+    fun setRhythmGuardAlertThresholdMinutes(minutes: Int) {
+        val safeMinutes = minutes.coerceIn(-1, 24 * 60)
+        prefs.edit().putInt(KEY_RHYTHM_GUARD_ALERT_THRESHOLD_MINUTES, safeMinutes).apply()
+        _rhythmGuardAlertThresholdMinutes.value = safeMinutes
+    }
+
+    fun setRhythmGuardWarningTimeoutMinutes(minutes: Int) {
+        val safeMinutes = minutes.coerceIn(1, 60)
+        prefs.edit().putInt(KEY_RHYTHM_GUARD_WARNING_TIMEOUT_MINUTES, safeMinutes).apply()
+        _rhythmGuardWarningTimeoutMinutes.value = safeMinutes
+    }
+
+    fun setRhythmGuardBreakResumeMinutes(minutes: Int) {
+        val safeMinutes = minutes.coerceIn(1, 180)
+        prefs.edit().putInt(KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES, safeMinutes).apply()
+        _rhythmGuardBreakResumeMinutes.value = safeMinutes
+    }
+
+    fun setRhythmGuardListeningTimeout(untilEpochMs: Long, reason: String = "") {
+        val safeUntil = untilEpochMs.coerceAtLeast(0L)
+        val safeReason = reason.trim()
+        prefs.edit()
+            .putLong(KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS, safeUntil)
+            .putString(KEY_RHYTHM_GUARD_TIMEOUT_REASON, safeReason)
+            .apply()
+        _rhythmGuardTimeoutUntilMs.value = safeUntil
+        _rhythmGuardTimeoutReason.value = safeReason
+    }
+
+    fun clearRhythmGuardListeningTimeout() {
+        setRhythmGuardListeningTimeout(0L, "")
+    }
+
+    fun isRhythmGuardTimeoutActive(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val timeoutUntil = _rhythmGuardTimeoutUntilMs.value
+        return timeoutUntil > nowMs
+    }
+
+    fun getRhythmGuardPolicyBands(): List<RhythmGuardPolicyBand> = RHYTHM_GUARD_POLICY_BANDS
+
+    @Deprecated("Use getRhythmGuardPolicyBands")
+    fun getRhythmAuraPolicyBands(): List<RhythmAuraPolicyBand> = RHYTHM_AURA_POLICY_BANDS
+
+    fun getRhythmGuardPolicy(age: Int = _rhythmAuraAge.value): RhythmGuardPolicyBand {
+        val safeAge = age.coerceIn(8, 80)
+        return RHYTHM_GUARD_POLICY_BANDS.firstOrNull { safeAge in it.minAge..it.maxAge }
+            ?: RHYTHM_GUARD_POLICY_BANDS.last()
+    }
+
+    @Deprecated("Use getRhythmGuardPolicy")
+    fun getRhythmAuraPolicy(age: Int = _rhythmAuraAge.value): RhythmAuraPolicyBand = getRhythmGuardPolicy(age)
+
+    fun estimateRhythmGuardTodayListeningMinutes(
+        dailyListeningStats: Map<String, Long>,
+        songsPlayed: Int,
+        listeningTimeMs: Long
+    ): Int {
+        val today = java.time.LocalDate.now().toString()
+        val songsToday = (dailyListeningStats[today] ?: 0L).coerceAtLeast(0L)
+        if (songsToday == 0L) return 0
+
+        val safeSongsPlayed = songsPlayed.coerceAtLeast(1)
+        val averageSongMinutes = ((listeningTimeMs / (1000f * 60f)) / safeSongsPlayed)
+            .coerceIn(2.0f, 6.0f)
+
+        return (songsToday * averageSongMinutes).toInt().coerceAtLeast(0)
+    }
+
+    @Deprecated("Use estimateRhythmGuardTodayListeningMinutes")
+    fun estimateRhythmAuraTodayListeningMinutes(
+        dailyListeningStats: Map<String, Long>,
+        songsPlayed: Int,
+        listeningTimeMs: Long
+    ): Int = estimateRhythmGuardTodayListeningMinutes(dailyListeningStats, songsPlayed, listeningTimeMs)
+
+    fun applyRhythmGuardAutoProfileForAge(age: Int) {
+        val safeAge = age.coerceIn(8, 80)
+        val policy = getRhythmGuardPolicy(safeAge)
+
+        setRhythmGuardManualVolumeThreshold(policy.maxVolumeThreshold)
+        setAudioNormalization(true)
+        setReplayGain(true)
+        setUseSystemVolume(true)
+        setStopPlaybackOnZeroVolume(policy.stopPlaybackOnZeroVolume)
+
+        if (policy.enforceHapticFeedback && !_hapticFeedbackEnabled.value) {
+            setHapticFeedbackEnabled(true)
+        }
+
+        setRhythmGuardLastAutoAppliedAt(System.currentTimeMillis())
+    }
+
+    @Deprecated("Use applyRhythmGuardAutoProfileForAge")
+    fun applyRhythmAuraAutoProfileForAge(age: Int) = applyRhythmGuardAutoProfileForAge(age)
+
+    private fun sanitizeRhythmGuardMode(mode: String?): String {
+        return when (mode) {
+            RHYTHM_GUARD_MODE_AUTO,
+            RHYTHM_GUARD_MODE_MANUAL,
+            RHYTHM_GUARD_MODE_OFF -> mode
+            else -> RHYTHM_GUARD_MODE_OFF
+        }
+    }
+
+    @Deprecated("Use sanitizeRhythmGuardMode")
+    private fun sanitizeRhythmAuraMode(mode: String?): String = sanitizeRhythmGuardMode(mode)
     
     fun setUniqueArtists(count: Int) {
         prefs.edit().putInt(KEY_UNIQUE_ARTISTS, count).apply()
@@ -3014,6 +3303,27 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _listeningTime.value = safeLong(KEY_LISTENING_TIME, 0L)
         _songsPlayed.value = prefs.getInt(KEY_SONGS_PLAYED, 0)
         _uniqueArtists.value = prefs.getInt(KEY_UNIQUE_ARTISTS, 0)
+        _rhythmAuraMode.value = sanitizeRhythmGuardMode(
+            prefs.getString(KEY_RHYTHM_GUARD_MODE, prefs.getString(KEY_RHYTHM_AURA_MODE, RHYTHM_GUARD_MODE_OFF))
+        )
+        _rhythmAuraAge.value = prefs.getInt(KEY_RHYTHM_GUARD_AGE, prefs.getInt(KEY_RHYTHM_AURA_AGE, 18)).coerceIn(8, 80)
+        _rhythmAuraManualWarningsEnabled.value = prefs.getBoolean(
+            KEY_RHYTHM_GUARD_MANUAL_WARNINGS_ENABLED,
+            prefs.getBoolean(KEY_RHYTHM_AURA_MANUAL_WARNINGS_ENABLED, true)
+        )
+        _rhythmAuraManualVolumeThreshold.value = prefs.getFloat(
+            KEY_RHYTHM_GUARD_MANUAL_VOLUME_THRESHOLD,
+            prefs.getFloat(KEY_RHYTHM_AURA_MANUAL_VOLUME_THRESHOLD, 0.68f)
+        ).coerceIn(0.40f, 0.95f)
+        _rhythmAuraLastAutoAppliedAt.value = safeLong(
+            KEY_RHYTHM_GUARD_LAST_AUTO_APPLIED_AT,
+            safeLong(KEY_RHYTHM_AURA_LAST_AUTO_APPLIED_AT, 0L)
+        )
+        _rhythmGuardAlertThresholdMinutes.value = prefs.getInt(KEY_RHYTHM_GUARD_ALERT_THRESHOLD_MINUTES, -1).coerceIn(-1, 24 * 60)
+        _rhythmGuardWarningTimeoutMinutes.value = prefs.getInt(KEY_RHYTHM_GUARD_WARNING_TIMEOUT_MINUTES, 2).coerceIn(1, 60)
+        _rhythmGuardBreakResumeMinutes.value = prefs.getInt(KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES, 15).coerceIn(1, 180)
+        _rhythmGuardTimeoutUntilMs.value = safeLong(KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS, 0L).coerceAtLeast(0L)
+        _rhythmGuardTimeoutReason.value = prefs.getString(KEY_RHYTHM_GUARD_TIMEOUT_REASON, null).orEmpty()
         
         // Enhanced User Preferences
         _favoriteGenres.value = try {
