@@ -3025,13 +3025,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // Check if song is part of an album with multiple tracks
         val albumSongs = _songs.value.filter { it.album == song.album && it.artist == song.artist }
         if (albumSongs.size > 1) {
-            // Sort by track number if available, otherwise by title
+            // Keep multi-disc albums in natural disc -> track order.
             val sortedAlbumSongs = albumSongs.sortedWith { a, b ->
-                if (a.trackNumber != 0 || b.trackNumber != 0) {
-                    a.trackNumber.compareTo(b.trackNumber)
-                } else {
-                    a.title.compareTo(b.title)
-                }
+                compareByDiscThenTrack(a, b)
             }
             val startIndex = sortedAlbumSongs.indexOfFirst { it.id == song.id }
             if (startIndex != -1) {
@@ -3060,6 +3056,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // Fallback: return just the single song
         Log.d(TAG, "No context found, returning single song queue")
         return listOf(song)
+    }
+
+    private fun compareByDiscThenTrack(a: Song, b: Song): Int {
+        val discA = if (a.discNumber > 0) a.discNumber else 1
+        val discB = if (b.discNumber > 0) b.discNumber else 1
+
+        return when {
+            discA != discB -> discA.compareTo(discB)
+            a.trackNumber > 0 && b.trackNumber > 0 -> a.trackNumber.compareTo(b.trackNumber)
+            a.trackNumber > 0 -> -1
+            b.trackNumber > 0 -> 1
+            else -> a.title.compareTo(b.title, ignoreCase = true)
+        }
     }
 
     /**
@@ -3371,14 +3380,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // Use album's songs directly if available (they're already loaded)
             if (album.songs.isNotEmpty()) {
                 Log.d(TAG, "Using ${album.songs.size} songs from album object")
-                // Sort by track number to maintain album order
+                // Sort by disc then track to maintain multi-disc album order
                 val sortedSongs = album.songs.sortedWith { a, b ->
-                    when {
-                        a.trackNumber > 0 && b.trackNumber > 0 -> a.trackNumber.compareTo(b.trackNumber)
-                        a.trackNumber > 0 -> -1
-                        b.trackNumber > 0 -> 1
-                        else -> a.title.compareTo(b.title, ignoreCase = true)
-                    }
+                    compareByDiscThenTrack(a, b)
                 }
                 playQueue(sortedSongs)
             } else {
@@ -3387,14 +3391,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val songs = repository.getSongsForAlbumLocal(album.id)
                 Log.d(TAG, "Found ${songs.size} songs for album")
                 if (songs.isNotEmpty()) {
-                    // Sort by track number
+                    // Sort by disc then track to maintain multi-disc album order
                     val sortedSongs = songs.sortedWith { a: Song, b: Song ->
-                        when {
-                            a.trackNumber > 0 && b.trackNumber > 0 -> a.trackNumber.compareTo(b.trackNumber)
-                            a.trackNumber > 0 -> -1
-                            b.trackNumber > 0 -> 1
-                            else -> a.title.compareTo(b.title, ignoreCase = true)
-                        }
+                        compareByDiscThenTrack(a, b)
                     }
                     playQueue(sortedSongs)
                 } else {
