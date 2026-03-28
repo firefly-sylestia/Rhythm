@@ -243,6 +243,16 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             settingKey = "hapticFeedback"
         ))
         add(SearchableSettingItem(
+            id = "settings_suggestions",
+            title = "Settings Suggestions",
+            description = "Show contextual suggestions at the top",
+            keywords = listOf("suggestions", "tips", "recommendations", "contextual", "settings"),
+            icon = Icons.Default.AutoAwesome,
+            route = null,
+            parentScreen = context.getString(R.string.settings_section_user_interface),
+            settingKey = "showSettingsSuggestions"
+        ))
+        add(SearchableSettingItem(
             id = "gestures",
             title = context.getString(R.string.settings_gestures),
             description = context.getString(R.string.settings_gestures_desc),
@@ -289,8 +299,8 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             description = context.getString(R.string.settings_show_lyrics_desc),
             keywords = listOf("lyrics", "show", "display", "text", "song words"),
             icon = Icons.Default.Lyrics,
-            route = null,
-            parentScreen = context.getString(R.string.settings_section_audio_lyrics),
+            route = SettingsRoutes.PLAYER_CUSTOMIZATION,
+            parentScreen = context.getString(R.string.settings_player_customization),
             settingKey = "showLyrics"
         ))
         add(SearchableSettingItem(
@@ -299,8 +309,8 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             description = context.getString(R.string.playback_lyrics_priority_desc),
             keywords = listOf("lyrics", "synced lyrics", "lrc", "subtitle", "song text", "karaoke", "source", "priority"),
             icon = Icons.Default.Lyrics,
-            route = null,
-            parentScreen = context.getString(R.string.settings_section_audio_lyrics),
+            route = SettingsRoutes.PLAYER_CUSTOMIZATION,
+            parentScreen = context.getString(R.string.settings_player_customization),
             settingKey = "lyricsSource"
         ))
         add(SearchableSettingItem(
@@ -783,16 +793,6 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             parentScreen = "Player"
         ))
         add(SearchableSettingItem(
-            id = "playback_pitch",
-            title = context.getString(R.string.settings_playback_pitch),
-            description = context.getString(R.string.settings_playback_pitch_desc),
-            keywords = listOf("pitch", "tone", "semitone", "key", "audio pitch", "higher", "lower"),
-            icon = Icons.Default.Equalizer,
-            route = null,
-            parentScreen = "Player",
-            settingKey = "playbackPitch"
-        ))
-        add(SearchableSettingItem(
             id = "lossless_artwork",
             title = context.getString(R.string.settings_lossless_artwork),
             description = context.getString(R.string.settings_lossless_artwork_desc),
@@ -1131,9 +1131,19 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             description = context.getString(R.string.settings_bit_perfect_mode_desc_native),
             keywords = listOf("high-resolution", "hi-res", "bit perfect", "bit-perfect", "audio", "sample rate", "resampling", "hi-res", "quality", "lossless", "44.1khz", "48khz", "96khz", "192khz", "native", "dac"),
             icon = Icons.Default.HighQuality,
-            route = null,
+            route = SettingsRoutes.QUEUE_PLAYBACK,
             parentScreen = "Queue & Playback",
             settingKey = "bitPerfectMode"
+        ))
+        add(SearchableSettingItem(
+            id = "audio_routing_mode",
+            title = context.getString(R.string.settings_audio_routing),
+            description = context.getString(R.string.settings_dac_usb_audio_desc),
+            keywords = listOf("audio routing", "dac", "usb audio", "default routing", "app routing", "system routing", "output"),
+            icon = Icons.Default.Headphones,
+            route = SettingsRoutes.QUEUE_PLAYBACK,
+            parentScreen = "Queue & Playback",
+            settingKey = "audioRoutingMode"
         ))
         
         add(SearchableSettingItem(

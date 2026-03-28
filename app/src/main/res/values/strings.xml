@@ -572,7 +572,7 @@
     <string name="onboarding_library_how_works">How Library Organization Works</string>
     <string name="onboarding_library_1">Customize tab order in Library for quick access to your favorites</string>
     <string name="onboarding_library_2">Create and manage playlists directly from the Library screen</string>
-    <string name="onboarding_library_3">Advanced display and sorting options available in Settings > Theme Customization</string>
+    <string name="onboarding_library_3">Advanced display and sorting options available in Settings > Library Settings</string>
     <string name="onboarding_library_4">Default playlists (Recently Added, Most Played) can be toggled in Settings > Playlists</string>
     <string name="onboarding_theme_title">Make Rhythm Yours</string>
     <string name="onboarding_theme_desc">Personalize Rhythm\'s appearance to match your style. Choose your system theme, font, or Material You dynamic colors (Android 12+).</string>
@@ -586,6 +586,19 @@
     <string name="onboarding_tuner_1">Custom color schemes and album art color extraction</string>
     <string name="onboarding_tuner_2">Font customization and typography settings</string>
     <string name="onboarding_tuner_3">Advanced theme options available in Settings > Theme Customization</string>
+    <string name="onboarding_rhythm_guard_title">Protect Your Hearing</string>
+    <string name="onboarding_rhythm_guard_desc">Set up Rhythm Guard to keep your listening safer with age-aware defaults and manual protection controls.</string>
+    <string name="onboarding_rhythm_guard_age_hint">Age profile helps Rhythm Guard recommend safer listening limits.</string>
+    <string name="onboarding_rhythm_guard_tip_1">Auto mode applies safer defaults with minimal setup.</string>
+    <string name="onboarding_rhythm_guard_tip_2">You can tune alerts and break reminders later in Settings.</string>
+    <string name="onboarding_rhythm_guard_tip_3">Manual mode gives you full control over warnings and thresholds.</string>
+    <string name="onboarding_full_tour_prompt_title">Continue Full Setup Tour?</string>
+    <string name="onboarding_full_tour_prompt_desc">Core setup is done. Continue for advanced customization, or finish now and explore the rest later from Settings.</string>
+    <string name="onboarding_full_tour_prompt_tip_1">Full tour includes playback, theme, gesture, and media scan options.</string>
+    <string name="onboarding_full_tour_prompt_tip_2">You can reopen onboarding anytime from Settings > Developer &amp; Debugging.</string>
+    <string name="onboarding_full_tour_prompt_tip_3">Nothing here is permanent. All choices can be changed later.</string>
+    <string name="onboarding_continue_full_tour">Continue Full Tour</string>
+    <string name="onboarding_finish_now">Finish Setup Now</string>
     <string name="onboarding_step_progress">%1$d of %2$d</string>
     <string name="onboarding_advanced_customization">Advanced Customization</string>
     <string name="onboarding_advanced_customization_desc">Custom color schemes, album art colors, and fonts</string>
@@ -599,7 +612,7 @@
     <string name="onboarding_media_scan_whitelist">Whitelist Mode: Show only songs from selected folders</string>
     <string name="onboarding_media_scan_configure_in_tuner">Configure scanning in Settings > Media Scan</string>
     <string name="onboarding_storage_title">Storage Management</string>
-    <string name="onboarding_storage_desc">Manage cache size and storage in Settings > Cache</string>
+    <string name="onboarding_storage_desc">Manage cache size and storage in Settings > Cache Management</string>
     
     <string name="onboarding_complete_title">You\'re All Set!</string>
     <string name="onboarding_complete_desc">Rhythm is ready to play! Your music library is being scanned in the background. Here\'s what\'s configured:</string>
@@ -823,6 +836,9 @@
     <!-- Settings -->
     <string name="settings_tip_theme">Customize your theme with colors, fonts, and festive effects</string>
     <string name="settings_tip_haptic">Enable haptic feedback for tactile responses</string>
+    <string name="settings_tip_gestures">Control playback faster with intuitive swipes and taps, no extra menus needed.</string>
+    <string name="settings_tip_gestures_swipe">Swipe up on mini player to open full player, then swipe down to dismiss when done.</string>
+    <string name="settings_tip_gestures_artwork">Swipe artwork to switch tracks and double tap album art for quick play or pause.</string>
     <string name="settings_tip_media_scan">Use media scan to hide unwanted files from your library</string>
     <string name="settings_tip_rhythm_guard_off">Protect your hearing by enabling Rhythm Guard</string>
     <string name="settings_tip_rhythm_guard_auto">Rhythm Guard automatically manages safe listening limits</string>
@@ -1773,7 +1789,7 @@
     <string name="settings_rhythm_guard_health_risk">Risky</string>
     <string name="settings_rhythm_guard_health_off">Guard off</string>
     <string name="settings_rhythm_guard_timeout_activity_title">Listening Timeout Active</string>
-    <string name="settings_rhythm_guard_timeout_activity_default_reason">Playback is paused to protect listening health.</string>
+    <string name="settings_rhythm_guard_timeout_activity_default_reason">Plot twist: your ears started a union and called for a snack break. Rhythm Guard paused playback so everyone can cool down.</string>
     <string name="settings_rhythm_guard_timeout_activity_countdown">Resume in %1$s</string>
     <string name="settings_rhythm_guard_timeout_activity_exit">Exit Timeout</string>
     <string name="settings_rhythm_guard_timeout_activity_close_app">Close App</string>

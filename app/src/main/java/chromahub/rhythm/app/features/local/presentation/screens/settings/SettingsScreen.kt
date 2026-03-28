@@ -142,7 +142,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalConfiguration
 import chromahub.rhythm.app.ui.theme.RhythmTheme
 import chromahub.rhythm.app.util.HapticUtils
+import androidx.lifecycle.viewmodel.compose.viewModel
+import chromahub.rhythm.app.features.local.presentation.components.player.SleepTimerBottomSheetNew
 import chromahub.rhythm.app.features.local.presentation.navigation.Screen
+import chromahub.rhythm.app.features.local.presentation.viewmodel.MusicViewModel
 
 // Define routes for navigation
 object SettingsRoutes {
@@ -875,6 +878,8 @@ fun SettingsScreenWrapper(
     val isTablet = configuration.screenWidthDp >= 600
 
     var currentRoute by rememberSaveable { mutableStateOf<String?>(null) }
+    var showSleepTimerBottomSheet by rememberSaveable { mutableStateOf(false) }
+    val musicViewModel: MusicViewModel = viewModel()
 
     // Hoist the main settings scroll state to persist across navigation
     val mainSettingsScrollState = rememberSaveable(
@@ -904,7 +909,7 @@ fun SettingsScreenWrapper(
         } else if (route == SettingsRoutes.EQUALIZER) {
             navController.navigate(Screen.Equalizer.route)
         } else if (route == SettingsRoutes.SLEEP_TIMER) {
-            navController.navigate(Screen.TunerSleepTimer.route)
+            showSleepTimerBottomSheet = true
         } else {
             currentRoute = route
         }
@@ -1138,6 +1143,15 @@ fun SettingsScreenWrapper(
             }
         }
     }
+
+    if (showSleepTimerBottomSheet) {
+        SleepTimerBottomSheetNew(
+            onDismiss = { showSleepTimerBottomSheet = false },
+            currentSong = null,
+            isPlaying = false,
+            musicViewModel = musicViewModel
+        )
+    }
 }
 
 @Composable
@@ -1293,19 +1307,19 @@ fun SettingsTipsRow(
                     )
                 )
             }
-            if ("haptic" !in dismissedIds) {
+            if ("gestures" !in dismissedIds) {
                 val descs = listOf(
-                    context.getString(R.string.settings_tip_haptic),
-                    "Immerse yourself by turning on subtle physical feedback across the playback controls.",
-                    "Enhance your navigation with engaging haptic device vibrations."
+                    context.getString(R.string.settings_tip_gestures),
+                    context.getString(R.string.settings_tip_gestures_swipe),
+                    context.getString(R.string.settings_tip_gestures_artwork)
                 )
                 add(
                     SettingsTipData(
-                        id = "haptic",
-                        icon = Icons.Default.TouchApp,
-                        title = "Haptics",
+                        id = "gestures",
+                        icon = Icons.Default.Gesture,
+                        title = context.getString(R.string.settings_gestures),
                         text = descs.random(random),
-                        route = null
+                        route = SettingsRoutes.GESTURES
                     )
                 )
             }

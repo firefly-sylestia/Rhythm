@@ -163,6 +163,7 @@ import chromahub.rhythm.app.shared.data.model.AppSettings
 import chromahub.rhythm.app.shared.presentation.components.common.DataProcessingLoader
 import chromahub.rhythm.app.shared.presentation.components.common.InitializationLoader
 import chromahub.rhythm.app.shared.presentation.components.common.NetworkOperationLoader
+import chromahub.rhythm.app.shared.presentation.components.common.ExpressiveButtonGroup
 import chromahub.rhythm.app.shared.presentation.components.icons.RhythmIcons
 import chromahub.rhythm.app.features.local.presentation.components.settings.LanguageSwitcherDialog
 import chromahub.rhythm.app.features.local.presentation.components.settings.LibraryTabOrderBottomSheet
@@ -197,6 +198,8 @@ fun OnboardingScreen(
     currentStep: OnboardingStep,
     onNextStep: () -> Unit,
     onPrevStep: () -> Unit,
+    onContinueFullTour: () -> Unit,
+    onSkipFullTour: () -> Unit,
     onRequestAgain: () -> Unit,
     permissionScreenState: PermissionScreenState,
     isParentLoading: Boolean,
@@ -221,26 +224,28 @@ fun OnboardingScreen(
     val horizontalPadding = if (isTablet) 40.dp else 20.dp
     val cardPadding = if (isTablet) 32.dp else 20.dp
 
-    // Get current step index - Skip NOTIFICATIONS (2) and LIBRARY_SETUP (7)
+    // Notification and legacy library setup are removed from the visible flow.
     val stepIndex = when (currentStep) {
         OnboardingStep.WELCOME -> 0
         OnboardingStep.PERMISSIONS -> 1
-        OnboardingStep.NOTIFICATIONS -> 1 // Skip - map to previous step
-        OnboardingStep.BACKUP_RESTORE -> 2
-        OnboardingStep.AUDIO_PLAYBACK -> 3
-        OnboardingStep.THEMING -> 4
-        OnboardingStep.GESTURES -> 5
-        OnboardingStep.LIBRARY_SETUP -> 5 // Skip - map to previous step
-        OnboardingStep.MEDIA_SCAN -> 6
-        OnboardingStep.WIDGETS -> 7
-        OnboardingStep.INTEGRATIONS -> 8
-        OnboardingStep.RHYTHM_STATS -> 9
-        OnboardingStep.UPDATER -> 10
-        OnboardingStep.SETUP_FINISHED -> 11
-        OnboardingStep.COMPLETE -> 12
+        OnboardingStep.RHYTHM_GUARD -> 2
+        OnboardingStep.MEDIA_SCAN -> 3
+        OnboardingStep.UPDATER -> 4
+        OnboardingStep.FULL_TOUR_PROMPT -> 5
+        OnboardingStep.NOTIFICATIONS -> 5
+        OnboardingStep.BACKUP_RESTORE -> 6
+        OnboardingStep.AUDIO_PLAYBACK -> 7
+        OnboardingStep.THEMING -> 8
+        OnboardingStep.GESTURES -> 9
+        OnboardingStep.LIBRARY_SETUP -> 9
+        OnboardingStep.WIDGETS -> 10
+        OnboardingStep.INTEGRATIONS -> 11
+        OnboardingStep.RHYTHM_STATS -> 12
+        OnboardingStep.SETUP_FINISHED -> 13
+        OnboardingStep.COMPLETE -> 14
     }
 
-    val totalSteps = 12 // Reduced from 14 (skipping NOTIFICATIONS and LIBRARY_SETUP)
+    val totalSteps = 14
 
     // Create pager state
     val pagerState = rememberPagerState(
@@ -251,25 +256,32 @@ fun OnboardingScreen(
     // Sync pager with step changes
     LaunchedEffect(stepIndex) {
         if (pagerState.currentPage != stepIndex) {
-            pagerState.animateScrollToPage(stepIndex)
+            val pageJump = (pagerState.currentPage - stepIndex).absoluteValue
+            if (pageJump > 1) {
+                pagerState.scrollToPage(stepIndex)
+            } else {
+                pagerState.animateScrollToPage(stepIndex)
+            }
         }
     }
 
-    // Sync step with pager changes - Updated mapping without skipped steps (NOTIFICATIONS and LIBRARY_SETUP)
+    // Sync step with pager changes.
     LaunchedEffect(pagerState.currentPage) {
         val newStep = when (pagerState.currentPage) {
             0 -> OnboardingStep.WELCOME
             1 -> OnboardingStep.PERMISSIONS
-            2 -> OnboardingStep.BACKUP_RESTORE  // Skip NOTIFICATIONS
-            3 -> OnboardingStep.AUDIO_PLAYBACK
-            4 -> OnboardingStep.THEMING
-            5 -> OnboardingStep.GESTURES
-            6 -> OnboardingStep.MEDIA_SCAN       // Skip LIBRARY_SETUP
-            7 -> OnboardingStep.WIDGETS
-            8 -> OnboardingStep.INTEGRATIONS
-            9 -> OnboardingStep.RHYTHM_STATS
-            10 -> OnboardingStep.UPDATER
-            11 -> OnboardingStep.SETUP_FINISHED
+            2 -> OnboardingStep.RHYTHM_GUARD
+            3 -> OnboardingStep.MEDIA_SCAN
+            4 -> OnboardingStep.UPDATER
+            5 -> OnboardingStep.FULL_TOUR_PROMPT
+            6 -> OnboardingStep.BACKUP_RESTORE
+            7 -> OnboardingStep.AUDIO_PLAYBACK
+            8 -> OnboardingStep.THEMING
+            9 -> OnboardingStep.GESTURES
+            10 -> OnboardingStep.WIDGETS
+            11 -> OnboardingStep.INTEGRATIONS
+            12 -> OnboardingStep.RHYTHM_STATS
+            13 -> OnboardingStep.SETUP_FINISHED
             else -> OnboardingStep.COMPLETE
         }
         if (newStep != currentStep && pagerState.currentPage < stepIndex) {
@@ -304,16 +316,18 @@ fun OnboardingScreen(
                 val step = when (page) {
                     0 -> OnboardingStep.WELCOME
                     1 -> OnboardingStep.PERMISSIONS
-                    2 -> OnboardingStep.BACKUP_RESTORE
-                    3 -> OnboardingStep.AUDIO_PLAYBACK
-                    4 -> OnboardingStep.THEMING
-                    5 -> OnboardingStep.GESTURES
-                    6 -> OnboardingStep.MEDIA_SCAN
-                    7 -> OnboardingStep.WIDGETS
-                    8 -> OnboardingStep.INTEGRATIONS
-                    9 -> OnboardingStep.RHYTHM_STATS
-                    10 -> OnboardingStep.UPDATER
-                    11 -> OnboardingStep.SETUP_FINISHED
+                    2 -> OnboardingStep.RHYTHM_GUARD
+                    3 -> OnboardingStep.MEDIA_SCAN
+                    4 -> OnboardingStep.UPDATER
+                    5 -> OnboardingStep.FULL_TOUR_PROMPT
+                    6 -> OnboardingStep.BACKUP_RESTORE
+                    7 -> OnboardingStep.AUDIO_PLAYBACK
+                    8 -> OnboardingStep.THEMING
+                    9 -> OnboardingStep.GESTURES
+                    10 -> OnboardingStep.WIDGETS
+                    11 -> OnboardingStep.INTEGRATIONS
+                    12 -> OnboardingStep.RHYTHM_STATS
+                    13 -> OnboardingStep.SETUP_FINISHED
                     else -> OnboardingStep.COMPLETE
                 }
                 // Container for step-specific content - positioned at top within pager page
@@ -327,12 +341,6 @@ fun OnboardingScreen(
                             OnboardingStep.WELCOME -> {
                                 // Welcome screen without card
                                 EnhancedWelcomeContent(onNextStep = onNextStep, isTablet = isTablet, contentMaxWidth = contentMaxWidth)
-                            }
-                            OnboardingStep.NOTIFICATIONS -> {
-                                // Step skipped - should not reach here
-                            }
-                            OnboardingStep.LIBRARY_SETUP -> {
-                                // Step skipped - should not reach here
                             }
                             OnboardingStep.PERMISSIONS -> {
                                 EnhancedPermissionContent(
@@ -480,8 +488,84 @@ fun OnboardingScreen(
                                     }
                                 )
                             }
-                            // NOTIFICATIONS step skipped
-                            // OnboardingStep.NOTIFICATIONS -> { ... }
+                            OnboardingStep.RHYTHM_GUARD -> {
+                                EnhancedRhythmGuardContent(
+                                    appSettings = appSettings,
+                                    isTablet = isTablet,
+                                    backButton = if (stepIndex > 0) {
+                                        {
+                                            val buttonScale = remember { Animatable(1f) }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    scope.launch {
+                                                        buttonScale.animateTo(0.92f, animationSpec = tween(100))
+                                                        buttonScale.animateTo(1f, animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessHigh
+                                                        ))
+                                                    }
+                                                    onPrevStep()
+                                                },
+                                                modifier = Modifier
+                                                    .height(56.dp)
+                                                    .graphicsLayer {
+                                                        scaleX = buttonScale.value
+                                                        scaleY = buttonScale.value
+                                                    },
+                                                shape = RoundedCornerShape(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(context.getString(R.string.onboarding_back), style = MaterialTheme.typography.labelLarge)
+                                            }
+                                        }
+                                    } else null,
+                                    nextButton = {
+                                        val nextButtonScale = remember { Animatable(1f) }
+                                        Button(
+                                            onClick = {
+                                                scope.launch {
+                                                    nextButtonScale.animateTo(0.92f, animationSpec = tween(100))
+                                                    nextButtonScale.animateTo(1f, animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                        stiffness = Spring.StiffnessHigh
+                                                    ))
+                                                }
+                                                HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.LongPress)
+                                                onNextStep()
+                                            },
+                                            modifier = Modifier
+                                                .height(56.dp)
+                                                .graphicsLayer {
+                                                    scaleX = nextButtonScale.value
+                                                    scaleY = nextButtonScale.value
+                                                },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
+                                            shape = RoundedCornerShape(32.dp)
+                                        ) {
+                                            Text(
+                                                context.getString(R.string.onboarding_next),
+                                                style = MaterialTheme.typography.labelLarge.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                )
+                            }
                             OnboardingStep.BACKUP_RESTORE -> {
                                 EnhancedBackupRestoreContent(
                                     onNextStep = onNextStep,
@@ -1201,6 +1285,45 @@ fun OnboardingScreen(
                                     }
                                 )
                             }
+                            OnboardingStep.FULL_TOUR_PROMPT -> {
+                                EnhancedFullTourPromptContent(
+                                    onContinueFullTour = onContinueFullTour,
+                                    onSkipFullTour = onSkipFullTour,
+                                    isTablet = isTablet,
+                                    backButton = if (stepIndex > 0) {
+                                        {
+                                            val buttonScale = remember { Animatable(1f) }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    scope.launch {
+                                                        buttonScale.animateTo(0.92f, animationSpec = tween(100))
+                                                        buttonScale.animateTo(1f, animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessHigh
+                                                        ))
+                                                    }
+                                                    onPrevStep()
+                                                },
+                                                modifier = Modifier
+                                                    .height(56.dp)
+                                                    .graphicsLayer {
+                                                        scaleX = buttonScale.value
+                                                        scaleY = buttonScale.value
+                                                    },
+                                                shape = RoundedCornerShape(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(context.getString(R.string.onboarding_back), style = MaterialTheme.typography.labelLarge)
+                                            }
+                                        }
+                                    } else null
+                                )
+                            }
                             OnboardingStep.SETUP_FINISHED -> {
                                 EnhancedSetupFinishedContent(
                                     onFinish = onFinish,
@@ -1283,6 +1406,11 @@ fun OnboardingScreen(
                                 // This should not be visible as we transition to the main app
                                 Box(modifier = Modifier.fillMaxSize())
                             }
+                            OnboardingStep.NOTIFICATIONS,
+                            OnboardingStep.LIBRARY_SETUP -> {
+                                // Legacy steps not shown in the current onboarding flow.
+                                Box(modifier = Modifier.fillMaxSize())
+                            }
                         }
                     }
                 }
@@ -1291,7 +1419,7 @@ fun OnboardingScreen(
 
         // Bottom navigation bar
         AnimatedVisibility(
-            visible = currentStep != OnboardingStep.WELCOME && !isTablet,
+            visible = currentStep != OnboardingStep.WELCOME && currentStep != OnboardingStep.FULL_TOUR_PROMPT && !isTablet,
             enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
             exit = fadeOut() + slideOutVertically(targetOffsetY = { it })
         ) {
@@ -2092,6 +2220,7 @@ fun EnhancedPermissionContent(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Info,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -2673,7 +2802,7 @@ fun EnhancedBackupRestoreContent(
                 Card(
                     onClick = onOpenBottomSheet,
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -2683,6 +2812,7 @@ fun EnhancedBackupRestoreContent(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Backup,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             contentDescription = null,
                             
                             modifier = Modifier.size(24.dp)
@@ -2693,17 +2823,18 @@ fun EnhancedBackupRestoreContent(
                                 text = context.getString(R.string.onboarding_backup_center),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Text(
                                 text = context.getString(R.string.onboarding_backup_center_desc),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "Open backup & restore",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             
                             modifier = Modifier.size(20.dp)
                         )
@@ -2824,7 +2955,7 @@ fun EnhancedBackupRestoreContent(
                 Card(
                     onClick = onOpenBottomSheet,
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -2834,6 +2965,7 @@ fun EnhancedBackupRestoreContent(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Backup,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             contentDescription = null,
                             
                             modifier = Modifier.size(24.dp)
@@ -2844,17 +2976,18 @@ fun EnhancedBackupRestoreContent(
                                 text = context.getString(R.string.onboarding_backup_center),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Text(
                                 text = context.getString(R.string.onboarding_backup_center_desc),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "Open backup & restore",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             
                             modifier = Modifier.size(20.dp)
                         )
@@ -2911,6 +3044,7 @@ fun EnhancedBackupRestoreContent(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Info,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -3003,11 +3137,12 @@ fun EnhancedAudioPlaybackContent(
     nextButton: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val hapticFeedbackEnabled by appSettings.hapticFeedbackEnabled.collectAsState()
     val useSystemVolume by appSettings.useSystemVolume.collectAsState()
+    val stopPlaybackOnZeroVolume by appSettings.stopPlaybackOnZeroVolume.collectAsState()
+    val resumeOnDeviceReconnect by appSettings.resumeOnDeviceReconnect.collectAsState()
+    val autoAddToQueue by appSettings.autoAddToQueue.collectAsState()
     val showLyrics by appSettings.showLyrics.collectAsState()
     val lyricsSourcePreference by appSettings.lyricsSourcePreference.collectAsState()
-    val useHoursInTimeFormat by appSettings.useHoursInTimeFormat.collectAsState()
     val scrollState = rememberScrollState()
 
     if (isTablet) {
@@ -3065,7 +3200,7 @@ fun EnhancedAudioPlaybackContent(
                 // Equalizer and Sleep Timer info card
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -3078,6 +3213,7 @@ fun EnhancedAudioPlaybackContent(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Info,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -3120,24 +3256,16 @@ fun EnhancedAudioPlaybackContent(
             ) {
                 // Consolidated Audio Settings Card
                 AudioPlaybackSettingsCard(
-                    hapticFeedbackEnabled = hapticFeedbackEnabled,
                     useSystemVolume = useSystemVolume,
-                    autoAddToQueue = appSettings.autoAddToQueue.collectAsState().value,
-                    clearQueueOnNewSong = appSettings.clearQueueOnNewSong.collectAsState().value,
-                    repeatModePersistence = appSettings.repeatModePersistence.collectAsState().value,
-                    shuffleModePersistence = appSettings.shuffleModePersistence.collectAsState().value,
-                    shuffleUsesExoplayer = appSettings.shuffleUsesExoplayer.collectAsState().value,
+                    stopPlaybackOnZeroVolume = stopPlaybackOnZeroVolume,
+                    resumeOnDeviceReconnect = resumeOnDeviceReconnect,
+                    autoAddToQueue = autoAddToQueue,
                     showLyrics = showLyrics,
-                    useHoursInTimeFormat = useHoursInTimeFormat,
-                    onHapticChange = { appSettings.setHapticFeedbackEnabled(it) },
                     onSystemVolumeChange = { appSettings.setUseSystemVolume(it) },
+                    onStopPlaybackOnZeroVolumeChange = { appSettings.setStopPlaybackOnZeroVolume(it) },
+                    onResumeOnReconnectChange = { appSettings.setResumeOnDeviceReconnect(it) },
                     onAutoQueueChange = { appSettings.setAutoAddToQueue(it) },
-                    onClearQueueChange = { appSettings.setClearQueueOnNewSong(it) },
-                    onRepeatModeChange = { appSettings.setRepeatModePersistence(it) },
-                    onShuffleModeChange = { appSettings.setShuffleModePersistence(it) },
-                    onExoplayerShuffleChange = { appSettings.setShuffleUsesExoplayer(it) },
-                    onShowLyricsChange = { appSettings.setShowLyrics(it) },
-                    onUseHoursChange = { appSettings.setUseHoursInTimeFormat(it) }
+                    onShowLyricsChange = { appSettings.setShowLyrics(it) }
                 )
 
                 // Lyrics Source Priority dropdown (shown when lyrics are enabled)
@@ -3167,7 +3295,7 @@ fun EnhancedAudioPlaybackContent(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f)
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
                             )
                         ) {
                             Row(
@@ -3185,7 +3313,7 @@ fun EnhancedAudioPlaybackContent(
                                 Text(
                                     text = context.getString(R.string.onboarding_lyrics_sources),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
@@ -3246,24 +3374,16 @@ fun EnhancedAudioPlaybackContent(
             ) {
                 // Consolidated Audio Settings Card
                 AudioPlaybackSettingsCard(
-                    hapticFeedbackEnabled = hapticFeedbackEnabled,
                     useSystemVolume = useSystemVolume,
-                    autoAddToQueue = appSettings.autoAddToQueue.collectAsState().value,
-                    clearQueueOnNewSong = appSettings.clearQueueOnNewSong.collectAsState().value,
-                    repeatModePersistence = appSettings.repeatModePersistence.collectAsState().value,
-                    shuffleModePersistence = appSettings.shuffleModePersistence.collectAsState().value,
-                    shuffleUsesExoplayer = appSettings.shuffleUsesExoplayer.collectAsState().value,
+                    stopPlaybackOnZeroVolume = stopPlaybackOnZeroVolume,
+                    resumeOnDeviceReconnect = resumeOnDeviceReconnect,
+                    autoAddToQueue = autoAddToQueue,
                     showLyrics = showLyrics,
-                    useHoursInTimeFormat = useHoursInTimeFormat,
-                    onHapticChange = { appSettings.setHapticFeedbackEnabled(it) },
                     onSystemVolumeChange = { appSettings.setUseSystemVolume(it) },
+                    onStopPlaybackOnZeroVolumeChange = { appSettings.setStopPlaybackOnZeroVolume(it) },
+                    onResumeOnReconnectChange = { appSettings.setResumeOnDeviceReconnect(it) },
                     onAutoQueueChange = { appSettings.setAutoAddToQueue(it) },
-                    onClearQueueChange = { appSettings.setClearQueueOnNewSong(it) },
-                    onRepeatModeChange = { appSettings.setRepeatModePersistence(it) },
-                    onShuffleModeChange = { appSettings.setShuffleModePersistence(it) },
-                    onExoplayerShuffleChange = { appSettings.setShuffleUsesExoplayer(it) },
-                    onShowLyricsChange = { appSettings.setShowLyrics(it) },
-                    onUseHoursChange = { appSettings.setUseHoursInTimeFormat(it) }
+                    onShowLyricsChange = { appSettings.setShowLyrics(it) }
                 )
 
                 // Lyrics Source Priority dropdown (shown when lyrics are enabled)
@@ -3293,7 +3413,7 @@ fun EnhancedAudioPlaybackContent(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f)
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
                             )
                         ) {
                             Row(
@@ -3311,7 +3431,7 @@ fun EnhancedAudioPlaybackContent(
                                 Text(
                                     text = context.getString(R.string.onboarding_lyrics_sources),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
@@ -3325,7 +3445,7 @@ fun EnhancedAudioPlaybackContent(
             // Equalizer and Sleep Timer info card
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -3338,6 +3458,7 @@ fun EnhancedAudioPlaybackContent(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Info,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             contentDescription = null,
                             modifier = Modifier.size(24.dp)
                         )
@@ -3592,6 +3713,7 @@ fun EnhancedLibrarySetupContent(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Info,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             contentDescription = null,
                             modifier = Modifier.size(24.dp)
                         )
@@ -3840,24 +3962,16 @@ private fun FolderManagementCard(
 
 @Composable
 private fun AudioPlaybackSettingsCard(
-    hapticFeedbackEnabled: Boolean,
     useSystemVolume: Boolean,
+    stopPlaybackOnZeroVolume: Boolean,
+    resumeOnDeviceReconnect: Boolean,
     autoAddToQueue: Boolean,
-    clearQueueOnNewSong: Boolean,
-    repeatModePersistence: Boolean,
-    shuffleModePersistence: Boolean,
-    shuffleUsesExoplayer: Boolean,
     showLyrics: Boolean,
-    useHoursInTimeFormat: Boolean,
-    onHapticChange: (Boolean) -> Unit,
     onSystemVolumeChange: (Boolean) -> Unit,
+    onStopPlaybackOnZeroVolumeChange: (Boolean) -> Unit,
+    onResumeOnReconnectChange: (Boolean) -> Unit,
     onAutoQueueChange: (Boolean) -> Unit,
-    onClearQueueChange: (Boolean) -> Unit,
-    onRepeatModeChange: (Boolean) -> Unit,
-    onShuffleModeChange: (Boolean) -> Unit,
-    onExoplayerShuffleChange: (Boolean) -> Unit,
-    onShowLyricsChange: (Boolean) -> Unit,
-    onUseHoursChange: (Boolean) -> Unit
+    onShowLyricsChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -3869,20 +3983,6 @@ private fun AudioPlaybackSettingsCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column {
-            OnboardingSettingRow(
-                icon = Icons.Filled.TouchApp,
-                title = context.getString(R.string.onboarding_haptic_title),
-                description = context.getString(R.string.onboarding_haptic_desc),
-                isEnabled = hapticFeedbackEnabled,
-                onToggle = { 
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onHapticChange(it) 
-                }
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-            )
             OnboardingSettingRow(
                 icon = RhythmIcons.Player.VolumeUp,
                 title = context.getString(R.string.onboarding_system_volume_title),
@@ -3898,83 +3998,41 @@ private fun AudioPlaybackSettingsCard(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
             )
             OnboardingSettingRow(
-                icon = Icons.Filled.Queue,
+                icon = RhythmIcons.Player.Stop,
+                title = context.getString(R.string.settings_stop_playback_on_zero_volume),
+                description = context.getString(R.string.settings_stop_playback_on_zero_volume_desc),
+                isEnabled = stopPlaybackOnZeroVolume,
+                onToggle = {
+                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
+                    onStopPlaybackOnZeroVolumeChange(it)
+                }
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 20.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+            )
+            OnboardingSettingRow(
+                icon = RhythmIcons.Devices.Bluetooth,
+                title = context.getString(R.string.settings_resume_on_device_reconnect),
+                description = context.getString(R.string.settings_resume_on_device_reconnect_desc),
+                isEnabled = resumeOnDeviceReconnect,
+                onToggle = {
+                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
+                    onResumeOnReconnectChange(it)
+                }
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 20.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+            )
+            OnboardingSettingRow(
+                icon = RhythmIcons.Queue,
                 title = context.getString(R.string.onboarding_auto_queue_title),
                 description = context.getString(R.string.onboarding_auto_queue_desc),
                 isEnabled = autoAddToQueue,
                 onToggle = { 
                     HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
                     onAutoQueueChange(it) 
-                }
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-            )
-            OnboardingSettingRow(
-                icon = Icons.Filled.Delete,
-                title = context.getString(R.string.onboarding_clear_queue_title),
-                description = context.getString(R.string.onboarding_clear_queue_desc),
-                isEnabled = clearQueueOnNewSong,
-                onToggle = { 
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onClearQueueChange(it) 
-                }
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-            )
-            OnboardingSettingRow(
-                icon = Icons.Filled.Repeat,
-                title = context.getString(R.string.onboarding_repeat_mode_title),
-                description = context.getString(R.string.onboarding_repeat_mode_desc),
-                isEnabled = repeatModePersistence,
-                onToggle = { 
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onRepeatModeChange(it) 
-                }
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-            )
-            OnboardingSettingRow(
-                icon = Icons.Filled.Shuffle,
-                title = context.getString(R.string.onboarding_shuffle_mode_title),
-                description = context.getString(R.string.onboarding_shuffle_mode_desc),
-                isEnabled = shuffleModePersistence,
-                onToggle = { 
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onShuffleModeChange(it) 
-                }
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-            )
-            OnboardingSettingRow(
-                icon = Icons.Filled.Shuffle,
-                title = context.getString(R.string.onboarding_exoplayer_shuffle_title),
-                description = context.getString(R.string.onboarding_exoplayer_shuffle_desc),
-                isEnabled = shuffleUsesExoplayer,
-                onToggle = { 
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onExoplayerShuffleChange(it) 
-                }
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-            )
-            OnboardingSettingRow(
-                icon = Icons.Filled.AccessTime,
-                title = context.getString(R.string.settings_use_hours),
-                description = if (useHoursInTimeFormat) context.getString(R.string.settings_use_hours_enabled) else context.getString(R.string.settings_use_hours_disabled),
-                isEnabled = useHoursInTimeFormat,
-                onToggle = { 
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onUseHoursChange(it) 
                 }
             )
             HorizontalDivider(
@@ -4016,39 +4074,75 @@ private fun ThemeSettingsCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column {
-            OnboardingSettingRow(
-                icon = Icons.Filled.DarkMode,
-                title = context.getString(R.string.onboarding_follow_system_title),
-                description = context.getString(R.string.onboarding_follow_system_desc),
-                isEnabled = useSystemTheme,
-                onToggle = { 
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onSystemThemeChange(it) 
-                }
-            )
-            // Manual dark mode toggle (only shown when system theme is off)
-            AnimatedVisibility(
-                visible = !useSystemTheme,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 20.dp),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                    )
-                    OnboardingSettingRow(
-                        icon = Icons.Filled.DarkMode,
-                        title = context.getString(R.string.onboarding_dark_mode_title),
-                        description = context.getString(R.string.onboarding_dark_mode_desc),
-                        isEnabled = darkMode,
-                        onToggle = { 
-                            HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                            onDarkModeChange(it) 
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(34.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        tonalElevation = 0.dp
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                    )
+                    }
+                    Column {
+                        Text(
+                            text = context.getString(R.string.settings_theme_mode),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = context.getString(R.string.settings_theme_mode_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                ExpressiveButtonGroup(
+                    items = listOf(
+                        context.getString(R.string.settings_theme_system),
+                        context.getString(R.string.settings_theme_light),
+                        context.getString(R.string.settings_theme_dark)
+                    ),
+                    selectedIndex = when {
+                        useSystemTheme -> 0
+                        !darkMode -> 1
+                        else -> 2
+                    },
+                    onItemClick = { index ->
+                        HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
+                        when (index) {
+                            0 -> onSystemThemeChange(true)
+                            1 -> {
+                                onSystemThemeChange(false)
+                                onDarkModeChange(false)
+                            }
+                            2 -> {
+                                onSystemThemeChange(false)
+                                onDarkModeChange(true)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
+
             // Dynamic colors (Material You) - only on Android 12+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 HorizontalDivider(
@@ -4251,6 +4345,7 @@ fun EnhancedThemingContent(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Settings,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -4436,84 +4531,30 @@ fun EnhancedThemingContent(
                     }
                 } */
 
-                // Theme toggles - wrapped in Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                ) {
-                    Column {
-                        // System Theme toggle
-                        OnboardingSettingRow(
-                            icon = Icons.Filled.Settings,
-                            title = context.getString(R.string.onboarding_follow_system_title),
-                            description = context.getString(R.string.onboarding_follow_system_desc),
-                            isEnabled = useSystemTheme,
-                            onToggle = { enabled ->
-                                scope.launch {
-                                    themeViewModel.setUseSystemTheme(enabled)
-                                }
-                            }
-                        )
-
-                        // Dark Mode toggle
-                        AnimatedVisibility(
-                            visible = !useSystemTheme,
-                            enter = expandVertically() + fadeIn(),
-                            exit = shrinkVertically() + fadeOut()
-                        ) {
-                            Column {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 20.dp),
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                                )
-                                OnboardingSettingRow(
-                                    icon = Icons.Filled.DarkMode,
-                                    title = context.getString(R.string.onboarding_dark_mode_title),
-                                    description = context.getString(R.string.onboarding_dark_mode_desc),
-                                    isEnabled = darkMode,
-                                    onToggle = { enabled ->
-                                        scope.launch {
-                                            themeViewModel.setDarkMode(enabled)
-                                        }
-                                    }
-                                )
-                            }
+                ThemeSettingsCard(
+                    useSystemTheme = useSystemTheme,
+                    darkMode = darkMode,
+                    useDynamicColors = useDynamicColors,
+                    festiveTheme = festiveTheme,
+                    onSystemThemeChange = { enabled ->
+                        scope.launch {
+                            themeViewModel.setUseSystemTheme(enabled)
                         }
-
-                        // Dynamic Colors toggle
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 20.dp),
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                        )
-                        OnboardingSettingRow(
-                            icon = Icons.Filled.AutoAwesome,
-                            title = context.getString(R.string.onboarding_dynamic_colors_title),
-                            description = context.getString(R.string.onboarding_dynamic_colors_desc),
-                            isEnabled = useDynamicColors,
-                            onToggle = { enabled ->
-                                scope.launch {
-                                    themeViewModel.setUseDynamicColors(enabled)
-                                }
-                            }
-                        )
-
-                        // Festive Theme toggle
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 20.dp),
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                        )
-                        OnboardingSettingRow(
-                            icon = Icons.Filled.AutoAwesome,
-                            title = "Festive Theme",
-                            description = "Enable festive decorations and seasonal themes",
-                            isEnabled = festiveTheme,
-                            onToggle = { enabled ->
-                                appSettings.setFestiveThemeEnabled(enabled)
-                            }
-                        )
+                    },
+                    onDarkModeChange = { enabled ->
+                        scope.launch {
+                            themeViewModel.setDarkMode(enabled)
+                        }
+                    },
+                    onDynamicColorsChange = { enabled ->
+                        scope.launch {
+                            themeViewModel.setUseDynamicColors(enabled)
+                        }
+                    },
+                    onFestiveThemeChange = { enabled ->
+                        appSettings.setFestiveThemeEnabled(enabled)
                     }
-                }
+                )
 
 //                // Font selection card
 //                Card(
@@ -4853,6 +4894,7 @@ fun EnhancedThemingContent(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Settings,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             contentDescription = null,
                             modifier = Modifier.size(24.dp)
                         )
@@ -5123,6 +5165,431 @@ fun OnboardingDropdownOption(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun EnhancedRhythmGuardContent(
+    appSettings: AppSettings,
+    isTablet: Boolean = false,
+    backButton: @Composable (() -> Unit)? = null,
+    nextButton: @Composable () -> Unit
+) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val scrollState = rememberScrollState()
+
+    val rhythmGuardMode by appSettings.rhythmGuardMode.collectAsState()
+    val rhythmGuardAge by appSettings.rhythmGuardAge.collectAsState()
+    val rhythmGuardEnabled = rhythmGuardMode != AppSettings.RHYTHM_GUARD_MODE_OFF
+
+    fun setMode(mode: String) {
+        HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
+        appSettings.setRhythmGuardMode(mode)
+    }
+
+    @Composable
+    fun ModeSelectionCard() {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                OnboardingSettingRow(
+                    icon = Icons.Filled.Security,
+                    title = context.getString(R.string.settings_rhythm_guard),
+                    description = context.getString(R.string.settings_rhythm_guard_mode_desc),
+                    isEnabled = rhythmGuardEnabled,
+                    onToggle = { enabled ->
+                        setMode(if (enabled) AppSettings.RHYTHM_GUARD_MODE_AUTO else AppSettings.RHYTHM_GUARD_MODE_OFF)
+                    }
+                )
+
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    if (rhythmGuardEnabled) {
+                        ExpressiveButtonGroup(
+                            items = listOf(
+                                context.getString(R.string.settings_rhythm_guard_mode_auto),
+                                context.getString(R.string.settings_rhythm_guard_mode_manual)
+                            ),
+                            selectedIndex = if (rhythmGuardMode == AppSettings.RHYTHM_GUARD_MODE_MANUAL) 1 else 0,
+                            onItemClick = { index ->
+                                when (index) {
+                                    0 -> setMode(AppSettings.RHYTHM_GUARD_MODE_AUTO)
+                                    else -> setMode(AppSettings.RHYTHM_GUARD_MODE_MANUAL)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                )
+
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    Text(
+                        text = context.getString(R.string.settings_rhythm_guard_age_search_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest
+                        ) {
+                            IconButton(onClick = { appSettings.setRhythmGuardAge((rhythmGuardAge - 1).coerceAtLeast(8)) }) {
+                                Icon(imageVector = Icons.Filled.Remove, contentDescription = null)
+                            }
+                        }
+                        Text(
+                            text = rhythmGuardAge.toString(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest
+                        ) {
+                            IconButton(onClick = { appSettings.setRhythmGuardAge((rhythmGuardAge + 1).coerceAtMost(80)) }) {
+                                Icon(imageVector = Icons.Filled.Add, contentDescription = null)
+                            }
+                        }
+                    }
+                    Text(
+                        text = context.getString(R.string.onboarding_rhythm_guard_age_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+
+    if (isTablet) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .padding(vertical = 32.dp),
+            horizontalArrangement = Arrangement.spacedBy(32.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                horizontalAlignment = Alignment.Start,
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                AnimatedVisibility(visible = true, enter = scaleIn() + fadeIn()) {
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Security,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = context.getString(R.string.onboarding_rhythm_guard_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Text(
+                    text = context.getString(R.string.onboarding_rhythm_guard_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        OnboardingTipItem(
+                            icon = Icons.Filled.CheckCircle,
+                            text = context.getString(R.string.onboarding_rhythm_guard_tip_1)
+                        )
+                        OnboardingTipItem(
+                            icon = Icons.Filled.AccessTime,
+                            text = context.getString(R.string.onboarding_rhythm_guard_tip_2)
+                        )
+                        OnboardingTipItem(
+                            icon = Icons.Filled.Tune,
+                            text = context.getString(R.string.onboarding_rhythm_guard_tip_3)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    backButton?.invoke()
+                    nextButton()
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.Start,
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                ModeSelectionCard()
+            }
+        }
+    } else {
+        Column(
+            horizontalAlignment = Alignment.Start,
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+        ) {
+            AnimatedVisibility(visible = true, enter = scaleIn() + fadeIn()) {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Security,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = context.getString(R.string.onboarding_rhythm_guard_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = context.getString(R.string.onboarding_rhythm_guard_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 24.dp)
+            )
+
+            ModeSelectionCard()
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    OnboardingTipItem(
+                        icon = Icons.Filled.CheckCircle,
+                        text = context.getString(R.string.onboarding_rhythm_guard_tip_1)
+                    )
+                    OnboardingTipItem(
+                        icon = Icons.Filled.AccessTime,
+                        text = context.getString(R.string.onboarding_rhythm_guard_tip_2)
+                    )
+                    OnboardingTipItem(
+                        icon = Icons.Filled.Tune,
+                        text = context.getString(R.string.onboarding_rhythm_guard_tip_3)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun EnhancedFullTourPromptContent(
+    onContinueFullTour: () -> Unit,
+    onSkipFullTour: () -> Unit,
+    isTablet: Boolean = false,
+    backButton: @Composable (() -> Unit)? = null
+) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+
+    Column(
+        horizontalAlignment = Alignment.Start,
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+    ) {
+        AnimatedVisibility(visible = true, enter = scaleIn() + fadeIn()) {
+            Box(
+                modifier = Modifier
+                    .size(if (isTablet) 96.dp else 80.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(if (isTablet) 48.dp else 40.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = context.getString(R.string.onboarding_full_tour_prompt_title),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Text(
+            text = context.getString(R.string.onboarding_full_tour_prompt_desc),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 20.dp)
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                OnboardingTipItem(
+                    icon = Icons.Filled.Tune,
+                    text = context.getString(R.string.onboarding_full_tour_prompt_tip_1)
+                )
+                OnboardingTipItem(
+                    icon = Icons.Filled.LibraryMusic,
+                    text = context.getString(R.string.onboarding_full_tour_prompt_tip_2)
+                )
+                OnboardingTipItem(
+                    icon = Icons.Filled.Info,
+                    text = context.getString(R.string.onboarding_full_tour_prompt_tip_3)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.rhythm_splash_logo),
+                contentDescription = context.getString(R.string.updates_rhythm_logo_cd),
+                modifier = Modifier.size(80.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+                text = context.getString(R.string.common_rhythm),
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        if (isTablet) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                backButton?.invoke()
+                Spacer(modifier = Modifier.weight(1f))
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+
+        Button(
+            onClick = {
+                HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.LongPress)
+                onContinueFullTour()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(32.dp)
+        ) {
+            Text(
+                text = context.getString(R.string.onboarding_continue_full_tour),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = {
+                HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
+                onSkipFullTour()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(32.dp)
+        ) {
+            Text(
+                text = context.getString(R.string.onboarding_finish_now),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
     }
 }
 
@@ -6372,7 +6839,7 @@ fun EnhancedMediaScanContent(
                 // Media scan tips card
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
                     ),
                     shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -6386,6 +6853,7 @@ fun EnhancedMediaScanContent(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Info,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -6526,7 +6994,7 @@ fun EnhancedMediaScanContent(
             // Media scan tips card
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -6540,6 +7008,7 @@ fun EnhancedMediaScanContent(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Info,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             contentDescription = null,
                             modifier = Modifier.size(24.dp)
                         )
@@ -7651,6 +8120,7 @@ private fun NotificationInfoCard() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Filled.Info,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
                 )
@@ -8262,6 +8732,7 @@ private fun WidgetTipsCard() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Filled.Info,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
                 )
@@ -8626,13 +9097,14 @@ private fun IntegrationsInfoCard() {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.primaryContainer
         )
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Filled.Info,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     contentDescription = null,
                     
                     modifier = Modifier.size(24.dp)
@@ -8642,7 +9114,7 @@ private fun IntegrationsInfoCard() {
                     text = context.getString(R.string.onboarding_integrations_info_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -8650,7 +9122,7 @@ private fun IntegrationsInfoCard() {
             Text(
                 text = context.getString(R.string.onboarding_integrations_info_desc),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
                 lineHeight = 20.sp
             )
         }
@@ -8865,6 +9337,7 @@ private fun StatsFeaturesAndInfoCard() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Filled.Stars,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
                 )

@@ -625,6 +625,9 @@ class MainActivity : ComponentActivity() {
         return when (step) {
             OnboardingStep.WELCOME -> "Welcome"
             OnboardingStep.PERMISSIONS -> "Permissions"
+            OnboardingStep.RHYTHM_GUARD -> "Rhythm Guard"
+            OnboardingStep.UPDATER -> "Updates"
+            OnboardingStep.FULL_TOUR_PROMPT -> "Full Tour Choice"
             OnboardingStep.NOTIFICATIONS -> "Notifications"
             OnboardingStep.BACKUP_RESTORE -> "Backup & Restore"
             OnboardingStep.AUDIO_PLAYBACK -> "Audio & Playback"
@@ -635,7 +638,6 @@ class MainActivity : ComponentActivity() {
             OnboardingStep.WIDGETS -> "Widgets"
             OnboardingStep.INTEGRATIONS -> "Integrations"
             OnboardingStep.RHYTHM_STATS -> "Rhythm Stats"
-            OnboardingStep.UPDATER -> "Updates"
             OnboardingStep.SETUP_FINISHED -> "Setup Finished"
             OnboardingStep.COMPLETE -> "Complete"
         }
