@@ -1,6 +1,5 @@
 <div align="left">
 
-> [!IMPORTANT]
 > ### ⚠️ DEVELOPMENT CURRENTLY PAUSED
 > My development laptop has completely broken down, and I need your help to get back to coding! 
 > If Rhythm has made your daily music experience better, please consider chipping in to my hardware upgrade goal. Every little bit helps get the project back on track.
@@ -30,7 +29,7 @@
 [![Stars](https://img.shields.io/github/stars/cromaguy/Rhythm?style=flat-square&logo=star&color=ffc107&logoColor=white)](https://github.com/cromaguy/Rhythm/stargazers)
 [<img src="https://shields.rbtlog.dev/simple/chromahub.rhythm.app?style=flat-square" alt="RB shield">](https://shields.rbtlog.dev/chromahub.rhythm.app)
 
-### [🌐 Website](https://rhythmweb.vercel.app/) • [📥 Download](https://github.com/cromaguy/Rhythm/releases/latest) • [💬 Telegram](https://t.me/RhythmSupport) • [📖 Wiki](https://github.com/cromaguy/Rhythm/wiki)
+### [🌐 Website](https://rhythmweb.vercel.app/) • [📥 Download](https://github.com/cromaguy/Rhythm/releases/latest) • [🎧 Discord](https://discord.gg/vpRrk8AdVW) • [💬 Telegram](https://t.me/RhythmSupport) • [📖 Wiki](https://github.com/cromaguy/Rhythm/wiki)
 
 </div>
 
@@ -155,7 +154,7 @@ We welcome contributions! See our [CONTRIBUTING.md](https://github.com/cromaguy/
 
 * 🐛 **Found a bug?** [Open an issue](https://github.com/cromaguy/Rhythm/issues)
 * 💡 **Have an idea?** [Request a feature](https://github.com/cromaguy/Rhythm/issues)
-* 💬 **Want to chat?** [Join Telegram](https://t.me/RhythmSupport) or [GitHub Discussions](https://github.com/cromaguy/Rhythm/discussions)
+* 💬 **Want to chat?** [Join Discord](https://discord.gg/vpRrk8AdVW), [Telegram](https://t.me/RhythmSupport) or [GitHub Discussions](https://github.com/cromaguy/Rhythm/discussions)
 * 📖 **Need help?** [Read the Wiki](https://github.com/cromaguy/Rhythm/wiki)
 
 ---
@@ -175,9 +174,10 @@ We welcome contributions! See our [CONTRIBUTING.md](https://github.com/cromaguy/
 
 <div align="center">
 
-### ✨ Made with ❤️ by Team ChromaHub ✨
+### ✨ Made with ❤️ by Team ChromaHub
 
-<sub>**License:** [GNU General Public License v3.0](docs/LICENSE) | © 2026 Team ChromaHub. All rights reserved.</sub><br>
+<sub>**License:** [GNU General Public License v3.0](docs/LICENSE)</sub><br>
+<sub>© 2026 Team ChromaHub. All rights reserved.</sub><br>
 <sub>⭐ If Rhythm improved your daily listening, don't forget to star the repository! ⭐</sub>
 
 </div>
