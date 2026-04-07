@@ -364,7 +364,7 @@ fun SettingsScreen(
             SettingGroup(
                 title = context.getString(R.string.settings_section_notifications_services),
                 items = buildList {
-                    //add(SettingItem(Icons.Default.Notifications, context.getString(R.string.settings_notifications), context.getString(R.string.settings_notifications_desc), onClick = { onNavigateTo(SettingsRoutes.NOTIFICATIONS) }))
+                    add(SettingItem(Icons.Default.Notifications, context.getString(R.string.settings_notifications), context.getString(R.string.settings_notifications_desc), onClick = { onNavigateTo(SettingsRoutes.NOTIFICATIONS) }))
                     if (appMode == "LOCAL") {
                         add(SettingItem(Icons.Default.Api, context.getString(R.string.settings_api_management), context.getString(R.string.settings_api_management_desc), onClick = { onNavigateTo(SettingsRoutes.API_MANAGEMENT) }))
                     }

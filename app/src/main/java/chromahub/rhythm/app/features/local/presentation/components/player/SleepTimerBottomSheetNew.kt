@@ -6,7 +6,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -40,6 +39,7 @@ import chromahub.rhythm.app.R
 import chromahub.rhythm.app.shared.data.model.Song
 import chromahub.rhythm.app.features.local.presentation.viewmodel.MusicViewModel
 import chromahub.rhythm.app.features.local.presentation.viewmodel.MusicViewModel.SleepAction
+import chromahub.rhythm.app.shared.presentation.components.common.RhythmWavyProgressLoader
 import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
@@ -262,28 +262,27 @@ fun SleepTimerBottomSheetNew(
                             ) {
                                 val elapsedSeconds = totalTimerDuration - remainingSeconds
                                 val progress = if (totalTimerDuration > 0) elapsedSeconds.toFloat() / totalTimerDuration else 0f
-                                
-                                CircularWavyProgressIndicator(
-                                    progress = { progress },
+
+                                RhythmWavyProgressLoader(
+                                    progress = progress,
                                     modifier = Modifier.fillMaxSize(),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
-                                )
-                                
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally
+                                    indicatorColor = MaterialTheme.colorScheme.onPrimaryContainer
                                 ) {
-                                    Text(
-                                        text = formatTime(remainingSeconds),
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                    Text(
-                                        text = context.getString(R.string.bottomsheet_timer_remaining),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                                    )
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = formatTime(remainingSeconds),
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                        Text(
+                                            text = context.getString(R.string.bottomsheet_timer_remaining),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                        )
+                                    }
                                 }
                             }
                             

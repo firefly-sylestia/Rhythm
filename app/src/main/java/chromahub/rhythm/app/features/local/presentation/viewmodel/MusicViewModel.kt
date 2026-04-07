@@ -2,6 +2,9 @@ package chromahub.rhythm.app.features.local.presentation.viewmodel
 
 import android.app.Activity
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -9,11 +12,13 @@ import android.content.Intent
 import android.content.IntentFilter
 
 import android.os.Build
+import android.os.SystemClock
 import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import android.util.LruCache
+import androidx.core.app.NotificationCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +30,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import chromahub.rhythm.app.R
+import chromahub.rhythm.app.activities.MainActivity
 import chromahub.rhythm.app.shared.data.model.Album
 import chromahub.rhythm.app.shared.data.model.AppSettings
 import chromahub.rhythm.app.shared.data.model.Artist
@@ -65,6 +71,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.util.Calendar
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import chromahub.rhythm.app.shared.data.model.LyricsData // Import LyricsData
 import chromahub.rhythm.app.util.PendingWriteRequest // Import for metadata write requests
 import chromahub.rhythm.app.util.PendingLyricsWriteRequest
@@ -99,9 +106,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         // Keep manually imported lyrics bounded to avoid UI stalls and oversized cache files.
         private const val MAX_EDITABLE_LYRICS_CHARS = 200_000
+
+        // Avoid rapid controller rebuild storms during cold start/service reconnect windows.
+        private const val CONTROLLER_CONNECT_MIN_INTERVAL_MS = 750L
+
+        private const val OPERATIONS_NOTIFICATION_CHANNEL_ID = "rhythm_operations"
+        private const val MEDIA_SCAN_NOTIFICATION_ID = 1501
+        private const val PLAYLIST_IMPORT_NOTIFICATION_ID = 1502
+        private const val PLAYLIST_EXPORT_NOTIFICATION_ID = 1503
+        private const val LIBRARY_SETUP_NOTIFICATION_ID = 1504
+        private const val OPERATION_NOTIFICATION_AUTO_DISMISS_MS = 6000L
     }
 
     private val repository = MusicRepository(application)
+    private val notificationManager =
+        application.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val operationNotificationDismissJobs = mutableMapOf<Int, Job>()
+    private var mediaScanNotificationJob: Job? = null
+    private var mediaScanNotificationSequence: Long = 0L
+    private var lastMediaScanProgressKey: String? = null
+    private var lastLibrarySetupProgressText: String? = null
+    private var librarySetupNotificationArmed = false
+    private var librarySetupProcessingObserved = false
+    private var librarySetupCompletionDebounceJob: Job? = null
     
     // Job for debouncing ContentObserver-triggered refreshes
     private var mediaStoreRefreshJob: kotlinx.coroutines.Job? = null
@@ -247,6 +274,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     viewModelScope.launch {
                         delay(75)
                         syncQueueWithMediaController()
+                    }
+                }
+
+                MediaPlaybackService.BROADCAST_SLEEP_TIMER_STATUS -> {
+                    val timerActive = intent.getBooleanExtra(
+                        MediaPlaybackService.EXTRA_TIMER_ACTIVE,
+                        false
+                    )
+                    val remainingMs = intent.getLongExtra(
+                        MediaPlaybackService.EXTRA_REMAINING_TIME,
+                        0L
+                    ).coerceAtLeast(0L)
+
+                    if (timerActive) {
+                        val remainingSeconds = ((remainingMs + 999L) / 1000L).coerceAtLeast(1L)
+                        _sleepTimerActive.value = true
+                        _sleepTimerRemainingSeconds.value = remainingSeconds
+                        sleepTimerJob?.cancel()
+                        sleepTimerJob = null
+                    } else {
+                        _sleepTimerActive.value = false
+                        _sleepTimerRemainingSeconds.value = 0L
+                        sleepTimerJob?.cancel()
+                        sleepTimerJob = null
                     }
                 }
             }
@@ -623,6 +674,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
+    private val controllerConnectInFlight = AtomicBoolean(false)
+    private var lastControllerConnectAttemptMs = 0L
     
     // Audio session ID for equalizer integration
     val audioSessionId: Int
@@ -693,6 +746,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGenreDetectionComplete = MutableStateFlow(false)
     val isGenreDetectionComplete: StateFlow<Boolean> = _isGenreDetectionComplete.asStateFlow()
     private val _isGenreDetectionRunning = MutableStateFlow(false)
+    val isGenreDetectionRunning: StateFlow<Boolean> = _isGenreDetectionRunning.asStateFlow()
     
     // Artwork fetching state
     private val _isFetchingArtwork = MutableStateFlow(false)
@@ -838,6 +892,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         Log.d(TAG, "Initializing MusicViewModel")
+        startLibrarySetupCompletionMonitor()
         
         // Single coroutine for main initialization to ensure proper ordering
         viewModelScope.launch {
@@ -922,6 +977,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             addAction("chromahub.rhythm.app.action.FAVORITE_CHANGED")
             addAction("chromahub.rhythm.app.action.WIDGET_TOGGLE_FAVORITE")
             addAction(MediaPlaybackService.ACTION_SHUFFLE_STATE_CHANGED)
+            addAction(MediaPlaybackService.BROADCAST_SLEEP_TIMER_STATUS)
         }
         
         // Resume playback on audio device reconnection (e.g., Bluetooth headphones reconnected)
@@ -1296,6 +1352,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * This is called AFTER _isInitialized is set to true, so UI is already responsive.
      */
     private fun startBackgroundTasksDeferred() {
+        armLibrarySetupCompletionNotification()
+
         // Note: The redundant full MediaStore sync on startup has been removed.
         // It used to call loadSongs(forceRefresh=true) 500ms after app launch,
         // causing severe UI lag and DB writes.
@@ -1401,6 +1459,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     
     // Keep old method for library refresh which needs immediate execution
     private suspend fun startBackgroundTasks() {
+        armLibrarySetupCompletionNotification()
+
         // Register ContentObserver for automatic MediaStore updates
         repository.registerMediaStoreObserver {
             Log.d(TAG, "MediaStore changed, scheduling incremental scan")
@@ -1659,16 +1719,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * This will update the songs, albums, and artists in the ViewModel.
      */
     fun refreshLibrary(showMediaScanLoader: Boolean = true) {
+        mediaScanNotificationSequence += 1
+        val notificationSequence = mediaScanNotificationSequence
+        armLibrarySetupCompletionNotification()
+
         // Cancel any existing scan
         scanJob?.cancel()
         
         scanJob = viewModelScope.launch {
             Log.d(TAG, "Starting library refresh...")
+            val previousSongCount = _songs.value.size
+            var refreshCompletedSuccessfully = false
+            var refreshCancelled = false
+
             _isMediaScanning.value = showMediaScanLoader // Only show full-screen loader when requested
             _isLibraryRefreshing.value = true // Always set for pull-to-refresh tracking
             _isInitialized.value = false // Indicate that data is being refreshed
             _isGenreDetectionComplete.value = false // Reset genre detection state
             // Don't reset _isGenreDetectionRunning to allow proper concurrency check
+
+            startMediaScanProgressNotifications(notificationSequence)
             
             val startTime = System.currentTimeMillis()
 
@@ -1692,15 +1762,28 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     populateMostPlayedPlaylist()
                 }
                 
-                // Refresh all playlists to remove songs that no longer exist on the device
-                refreshPlaylists()
+                // When the scanned library drops sharply (for example removable storage unmounted),
+                // keep unresolved playlist entries temporarily so ordering survives remount.
+                val preserveMissingSongs =
+                    previousSongCount > 0 && freshSongs.size < (previousSongCount * 0.7f).toInt()
+                if (preserveMissingSongs) {
+                    Log.d(
+                        TAG,
+                        "Detected large library drop ($previousSongCount -> ${freshSongs.size}); preserving unresolved playlist entries"
+                    )
+                }
+
+                refreshPlaylists(preserveMissingSongs = preserveMissingSongs)
 
                 // Re-fetch artwork from internet for newly added/updated items (but don't block completion)
                 launch { 
                     try {
+                        _isFetchingArtwork.value = true
                         fetchArtworkFromInternet()
                     } catch (e: Exception) {
                         Log.w(TAG, "Artwork fetching failed but continuing with library refresh", e)
+                    } finally {
+                        _isFetchingArtwork.value = false
                     }
                 }
                 
@@ -1708,9 +1791,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // Restart background audio metadata extraction
                 launch {
+                    _isExtractingMetadata.value = true
                     try {
                         delay(3000) // Wait 3 seconds before starting metadata extraction
-                        _isExtractingMetadata.value = true
                         extractAudioMetadataInBackground()
                     } catch (e: Exception) {
                         Log.e(TAG, "Error restarting background audio metadata extraction", e)
@@ -1746,8 +1829,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 appSettings.setLastScanDuration(duration)
                 
                 Log.d(TAG, "Library refresh complete. Loaded ${_songs.value.size} songs, ${_albums.value.size} albums, ${_artists.value.size} artists in ${duration}ms")
+                refreshCompletedSuccessfully = true
             } catch (e: kotlinx.coroutines.CancellationException) {
                 Log.d(TAG, "Library refresh cancelled by user")
+                refreshCancelled = true
                 throw e // Re-throw to allow proper cancellation
             } catch (e: Exception) {
                 Log.e(TAG, "Error during library refresh", e)
@@ -1767,14 +1852,57 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } finally {
+                stopMediaScanProgressNotifications()
                 _isInitialized.value = true // Mark as initialized again
                 _isMediaScanning.value = false // Hide media scan loader
                 _isLibraryRefreshing.value = false // Reset pull-to-refresh state
                 
                 // Ensure MediaScanLoader doesn't get stuck by dispatching a completion event
                 // This is a safety measure for cases where the StateFlow updates might not trigger UI properly
-                delay(1000) // Give UI time to process the state changes
+                try {
+                    delay(1000) // Give UI time to process the state changes
+                } catch (_: kotlinx.coroutines.CancellationException) {
+                    // Keep cleanup deterministic even when the refresh coroutine is cancelled.
+                }
                 Log.d(TAG, "Media scanning state cleared - final state: ${_songs.value.size} songs, ${_albums.value.size} albums, ${_artists.value.size} artists")
+
+                if (!refreshCompletedSuccessfully) {
+                    disarmLibrarySetupCompletionNotification()
+                }
+
+                if (notificationSequence == mediaScanNotificationSequence) {
+                    val context = getApplication<Application>()
+                    when {
+                        refreshCompletedSuccessfully -> {
+                            showOperationResultNotification(
+                                notificationId = MEDIA_SCAN_NOTIFICATION_ID,
+                                title = context.getString(R.string.notification_media_scan_title),
+                                content = context.getString(R.string.notification_media_scan_complete_pending_setup),
+                                isError = false
+                            )
+                        }
+
+                        refreshCancelled -> {
+                            showOperationResultNotification(
+                                notificationId = MEDIA_SCAN_NOTIFICATION_ID,
+                                title = context.getString(R.string.notification_media_scan_title),
+                                content = context.getString(R.string.notification_media_scan_cancelled),
+                                isError = false,
+                                autoDismissMs = 3000L
+                            )
+                        }
+
+                        else -> {
+                            showOperationResultNotification(
+                                notificationId = MEDIA_SCAN_NOTIFICATION_ID,
+                                title = context.getString(R.string.notification_media_scan_title),
+                                content = context.getString(R.string.notification_media_scan_failed),
+                                isError = true,
+                                autoDismissMs = 8000L
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1785,39 +1913,391 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelScan() {
         Log.d(TAG, "Cancelling scan...")
         scanJob?.cancel()
+        disarmLibrarySetupCompletionNotification()
+        stopMediaScanProgressNotifications()
         _isMediaScanning.value = false
         _isLibraryRefreshing.value = false
         _isInitialized.value = true
+    }
+
+    private fun armLibrarySetupCompletionNotification() {
+        librarySetupNotificationArmed = true
+        librarySetupProcessingObserved = false
+        lastLibrarySetupProgressText = null
+    }
+
+    private fun disarmLibrarySetupCompletionNotification() {
+        librarySetupCompletionDebounceJob?.cancel()
+        librarySetupCompletionDebounceJob = null
+        librarySetupNotificationArmed = false
+        librarySetupProcessingObserved = false
+        lastLibrarySetupProgressText = null
+    }
+
+    private fun resolveLibrarySetupProgressText(
+        context: Application,
+        isMediaScanRunning: Boolean,
+        isGenreDetectionRunning: Boolean,
+        isArtworkFetching: Boolean,
+        isMetadataExtractionRunning: Boolean
+    ): String {
+        return when {
+            isMediaScanRunning -> context.getString(R.string.scanning_media)
+            isGenreDetectionRunning -> context.getString(R.string.detecting_genres)
+            isArtworkFetching -> context.getString(R.string.fetching_artwork)
+            isMetadataExtractionRunning -> context.getString(R.string.extracting_metadata)
+            else -> context.getString(R.string.processing_library)
+        }
+    }
+
+    private fun startLibrarySetupCompletionMonitor() {
+        viewModelScope.launch {
+            combine(
+                isBackgroundProcessing,
+                isMediaScanning,
+                isGenreDetectionRunning,
+                isFetchingArtwork,
+                isExtractingMetadata
+            ) { processing, mediaScanRunning, genreDetectionRunning, artworkFetching, metadataExtractionRunning ->
+                listOf(
+                    processing,
+                    mediaScanRunning,
+                    genreDetectionRunning,
+                    artworkFetching,
+                    metadataExtractionRunning
+                )
+            }.collect { state ->
+                if (!librarySetupNotificationArmed) {
+                    return@collect
+                }
+
+                val processing = state[0]
+                val mediaScanRunning = state[1]
+                val genreDetectionRunning = state[2]
+                val artworkFetching = state[3]
+                val metadataExtractionRunning = state[4]
+
+                val context = getApplication<Application>()
+
+                if (processing) {
+                    librarySetupProcessingObserved = true
+                    librarySetupCompletionDebounceJob?.cancel()
+                    librarySetupCompletionDebounceJob = null
+
+                    // Media scan has its own dedicated progress notification.
+                    // Show library-setup progress only for post-scan background tasks.
+                    if (mediaScanRunning && !genreDetectionRunning && !artworkFetching && !metadataExtractionRunning) {
+                        return@collect
+                    }
+
+                    val progressText = resolveLibrarySetupProgressText(
+                        context = context,
+                        isMediaScanRunning = mediaScanRunning,
+                        isGenreDetectionRunning = genreDetectionRunning,
+                        isArtworkFetching = artworkFetching,
+                        isMetadataExtractionRunning = metadataExtractionRunning
+                    )
+
+                    if (progressText != lastLibrarySetupProgressText) {
+                        lastLibrarySetupProgressText = progressText
+                        showOperationProgressNotification(
+                            notificationId = LIBRARY_SETUP_NOTIFICATION_ID,
+                            title = context.getString(R.string.notification_library_setup_title),
+                            content = progressText,
+                            indeterminate = true
+                        )
+                    }
+
+                    return@collect
+                }
+
+                if (!librarySetupProcessingObserved) {
+                    return@collect
+                }
+
+                librarySetupCompletionDebounceJob?.cancel()
+                librarySetupCompletionDebounceJob = viewModelScope.launch {
+                    delay(5500)
+                    if (!librarySetupNotificationArmed || isBackgroundProcessing.value) {
+                        return@launch
+                    }
+
+                    val summary = context.getString(
+                        R.string.notification_library_setup_complete_summary,
+                        filteredSongs.value.size,
+                        filteredAlbums.value.size,
+                        filteredArtists.value.size
+                    )
+
+                    showOperationResultNotification(
+                        notificationId = LIBRARY_SETUP_NOTIFICATION_ID,
+                        title = context.getString(R.string.notification_library_setup_title),
+                        content = summary,
+                        isError = false,
+                        autoDismissMs = 5000L
+                    )
+
+                    disarmLibrarySetupCompletionNotification()
+                }
+            }
+        }
+    }
+
+    private fun ensureOperationsNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val context = getApplication<Application>()
+        val channel = NotificationChannel(
+            OPERATIONS_NOTIFICATION_CHANNEL_ID,
+            context.getString(R.string.notification_operations_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = context.getString(R.string.notification_operations_channel_desc)
+            setShowBadge(false)
+            enableVibration(false)
+        }
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    private fun createMainActivityPendingIntent(requestCode: Int): PendingIntent {
+        val context = getApplication<Application>()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun showOperationProgressNotification(
+        notificationId: Int,
+        title: String,
+        content: String,
+        progress: Int = 0,
+        max: Int = 0,
+        indeterminate: Boolean = true,
+        requestCode: Int = notificationId
+    ) {
+        ensureOperationsNotificationChannel()
+        operationNotificationDismissJobs.remove(notificationId)?.cancel()
+
+        val notification = NotificationCompat.Builder(
+            getApplication<Application>(),
+            OPERATIONS_NOTIFICATION_CHANNEL_ID
+        )
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setProgress(max.coerceAtLeast(0), progress.coerceAtLeast(0), indeterminate)
+            .setContentIntent(createMainActivityPendingIntent(requestCode))
+            .build()
+
+        notificationManager.notify(notificationId, notification)
+    }
+
+    private fun showOperationResultNotification(
+        notificationId: Int,
+        title: String,
+        content: String,
+        isError: Boolean,
+        autoDismissMs: Long = OPERATION_NOTIFICATION_AUTO_DISMISS_MS,
+        requestCode: Int = notificationId
+    ) {
+        ensureOperationsNotificationChannel()
+        operationNotificationDismissJobs.remove(notificationId)?.cancel()
+
+        val notification = NotificationCompat.Builder(
+            getApplication<Application>(),
+            OPERATIONS_NOTIFICATION_CHANNEL_ID
+        )
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+            .setCategory(
+                if (isError) {
+                    NotificationCompat.CATEGORY_ERROR
+                } else {
+                    NotificationCompat.CATEGORY_STATUS
+                }
+            )
+            .setPriority(
+                if (isError) {
+                    NotificationCompat.PRIORITY_DEFAULT
+                } else {
+                    NotificationCompat.PRIORITY_LOW
+                }
+            )
+            .setOnlyAlertOnce(true)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setProgress(0, 0, false)
+            .setContentIntent(createMainActivityPendingIntent(requestCode))
+            .build()
+
+        notificationManager.notify(notificationId, notification)
+        if (autoDismissMs > 0L) {
+            operationNotificationDismissJobs[notificationId] = viewModelScope.launch {
+                delay(autoDismissMs)
+                notificationManager.cancel(notificationId)
+                operationNotificationDismissJobs.remove(notificationId)
+            }
+        }
+    }
+
+    private fun startMediaScanProgressNotifications(sequence: Long) {
+        val context = getApplication<Application>()
+        mediaScanNotificationJob?.cancel()
+        lastMediaScanProgressKey = null
+
+        showOperationProgressNotification(
+            notificationId = MEDIA_SCAN_NOTIFICATION_ID,
+            title = context.getString(R.string.notification_media_scan_title),
+            content = context.getString(R.string.scanning_media),
+            indeterminate = true
+        )
+
+        mediaScanNotificationJob = viewModelScope.launch {
+            repository.scanProgress.collectLatest { progressState ->
+                if (sequence != mediaScanNotificationSequence) {
+                    return@collectLatest
+                }
+
+                val rawStage = progressState.stage.ifBlank { "Songs" }
+                if (rawStage.equals("Idle", ignoreCase = true)) {
+                    return@collectLatest
+                }
+
+                val stageLabel = when {
+                    rawStage.equals("Songs", ignoreCase = true) -> {
+                        context.getString(R.string.notification_media_scan_stage_songs)
+                    }
+
+                    rawStage.equals("Saving Database", ignoreCase = true) -> {
+                        context.getString(R.string.notification_media_scan_stage_saving)
+                    }
+
+                    rawStage.equals("Complete", ignoreCase = true) -> {
+                        context.getString(R.string.notification_media_scan_stage_finishing)
+                    }
+
+                    rawStage.equals("Error", ignoreCase = true) -> {
+                        context.getString(R.string.notification_media_scan_failed)
+                    }
+
+                    else -> rawStage
+                }
+
+                val hasDeterminateProgress = progressState.total > 0
+                val safeTotal = if (hasDeterminateProgress) progressState.total else 0
+                val safeCurrent = if (hasDeterminateProgress) {
+                    progressState.current.coerceIn(0, progressState.total)
+                } else {
+                    0
+                }
+                val content = if (hasDeterminateProgress) {
+                    "$stageLabel ($safeCurrent/$safeTotal)"
+                } else {
+                    stageLabel
+                }
+
+                val progressKey = "$rawStage|$safeCurrent|$safeTotal"
+                if (progressKey == lastMediaScanProgressKey) {
+                    return@collectLatest
+                }
+                lastMediaScanProgressKey = progressKey
+
+                showOperationProgressNotification(
+                    notificationId = MEDIA_SCAN_NOTIFICATION_ID,
+                    title = context.getString(R.string.notification_media_scan_title),
+                    content = content,
+                    progress = safeCurrent,
+                    max = safeTotal,
+                    indeterminate = !hasDeterminateProgress
+                )
+            }
+        }
+    }
+
+    private fun stopMediaScanProgressNotifications() {
+        mediaScanNotificationJob?.cancel()
+        mediaScanNotificationJob = null
+        lastMediaScanProgressKey = null
+    }
+
+    private fun clearOperationNotifications() {
+        disarmLibrarySetupCompletionNotification()
+        stopMediaScanProgressNotifications()
+        operationNotificationDismissJobs.values.forEach { it.cancel() }
+        operationNotificationDismissJobs.clear()
+        notificationManager.cancel(MEDIA_SCAN_NOTIFICATION_ID)
+        notificationManager.cancel(PLAYLIST_IMPORT_NOTIFICATION_ID)
+        notificationManager.cancel(PLAYLIST_EXPORT_NOTIFICATION_ID)
+        notificationManager.cancel(LIBRARY_SETUP_NOTIFICATION_ID)
     }
 
     /**
      * Refreshes all playlists by re-validating their songs against the currently available songs.
      * This removes songs from playlists if they no longer exist on the device OR are blacklisted.
      */
-    private fun refreshPlaylists() {
+    private fun refreshPlaylists(preserveMissingSongs: Boolean = false) {
         Log.d(TAG, "Refreshing playlists...")
         val currentSongsMap = _songs.value.associateBy { it.id }
+        val currentSongsByStableKey = _songs.value.groupBy { playlistSongStableKey(it) }
         val filteredSongsSet = filteredSongs.value.map { it.id }.toSet()
         
         _playlists.value = _playlists.value.map { playlist ->
-            // First, update metadata for all songs in the playlist
-            val songsWithUpdatedMetadata = playlist.songs.map { song ->
-                // Replace with the current version of the song from the library
-                currentSongsMap[song.id] ?: song
-            }
-            
-            // Then, filter out songs that no longer exist or are filtered out
-            val updatedSongs = songsWithUpdatedMetadata.filter { song ->
-                // Keep song only if it exists on device AND is not filtered out (blacklisted/not whitelisted)
-                currentSongsMap.containsKey(song.id) && filteredSongsSet.contains(song.id)
-            }
-            
-            if (updatedSongs.size < playlist.songs.size || songsWithUpdatedMetadata != playlist.songs) {
-                if (updatedSongs.size < playlist.songs.size) {
-                    Log.d(TAG, "Removed ${playlist.songs.size - updatedSongs.size} missing/filtered songs from playlist: ${playlist.name}")
+            var remappedByStableKey = 0
+            var preservedMissing = 0
+
+            val updatedSongs = playlist.songs.mapNotNull { playlistSong ->
+                val directMatch = currentSongsMap[playlistSong.id]
+                val resolvedSong = directMatch ?: currentSongsByStableKey[playlistSongStableKey(playlistSong)]?.firstOrNull()
+
+                when {
+                    resolvedSong != null && filteredSongsSet.contains(resolvedSong.id) -> {
+                        if (directMatch == null && resolvedSong.id != playlistSong.id) {
+                            remappedByStableKey++
+                        }
+                        resolvedSong
+                    }
+                    preserveMissingSongs -> {
+                        preservedMissing++
+                        playlistSong
+                    }
+                    else -> null
                 }
-                if (songsWithUpdatedMetadata != playlist.songs && updatedSongs.size == playlist.songs.size) {
-                    Log.d(TAG, "Updated metadata for songs in playlist: ${playlist.name}")
+            }
+
+            if (updatedSongs != playlist.songs) {
+                val removedCount = playlist.songs.size - updatedSongs.size
+                if (remappedByStableKey > 0) {
+                    Log.d(
+                        TAG,
+                        "Remapped $remappedByStableKey songs by stable key in playlist: ${playlist.name}"
+                    )
+                }
+                if (preservedMissing > 0) {
+                    Log.d(
+                        TAG,
+                        "Preserved $preservedMissing unresolved songs in playlist: ${playlist.name}"
+                    )
+                }
+                if (removedCount > 0) {
+                    Log.d(
+                        TAG,
+                        "Removed $removedCount missing/filtered songs from playlist: ${playlist.name}"
+                    )
                 }
                 playlist.copy(songs = updatedSongs, dateModified = System.currentTimeMillis())
             } else {
@@ -1826,6 +2306,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         savePlaylists()
         Log.d(TAG, "Playlists refreshed.")
+    }
+
+    private fun playlistSongStableKey(song: Song): String {
+        return listOf(
+            song.title.trim().lowercase(),
+            song.artist.trim().lowercase(),
+            song.album.trim().lowercase(),
+            (song.duration / 1000L).toString(),
+            song.trackNumber.toString(),
+            song.discNumber.toString()
+        ).joinToString("|")
     }
     
     /**
@@ -2608,6 +3099,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     Log.d(TAG, "No albums found that need artwork")
                 }
+
+                Log.d(TAG, "Fetching track artwork fallback from YouTube Music for songs without art")
+                val songsToUpdate = _songs.value.filter { it.artworkUri == null }.take(40)
+                if (songsToUpdate.isNotEmpty()) {
+                    val updatedSongs = repository.fetchTrackArtwork(songsToUpdate)
+                    val songMap = updatedSongs.associateBy { it.id }
+                    _songs.value = _songs.value.map { song ->
+                        songMap[song.id] ?: song
+                    }
+                    Log.d(TAG, "Updated ${updatedSongs.count { it.artworkUri != null }} songs with fallback artwork")
+                } else {
+                    Log.d(TAG, "No songs found that need fallback artwork")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching artwork from internet", e)
             }
@@ -2657,7 +3161,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Connect to the media service
      */
-    fun connectToMediaService() {
+    fun connectToMediaService(forceReconnect: Boolean = false) {
+        if (!forceReconnect && _serviceConnected.value && mediaController != null) {
+            return
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        if (!forceReconnect && now - lastControllerConnectAttemptMs < CONTROLLER_CONNECT_MIN_INTERVAL_MS) {
+            return
+        }
+
+        if (!controllerConnectInFlight.compareAndSet(false, true)) {
+            Log.d(TAG, "Media controller connection already in progress")
+            return
+        }
+
+        lastControllerConnectAttemptMs = now
         Log.d(TAG, "Connecting to media service")
         val context = getApplication<Application>()
         
@@ -2673,114 +3192,151 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             Log.e(TAG, "Failed to start media service: ${e.message}", e)
             // Try to connect without starting the service - the MediaController might still work
         }
+
+        releaseStaleControllerConnection()
         
         val sessionToken = SessionToken(
             context,
             ComponentName(context, MediaPlaybackService::class.java)
         )
-        
-        controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-        controllerFuture?.addListener({
-            try {
-                mediaController = controllerFuture?.get()
-                Log.d(TAG, "Media controller initialized: $mediaController")
-                
-                if (mediaController != null) {
-                    mediaController?.addListener(playerListener)
-                    _serviceConnected.value = true
-                    
-                    // Update shuffle and repeat mode from controller
-                    mediaController?.let { controller ->
-                        _isShuffleEnabled.value = controller.shuffleModeEnabled
-                        val controllerRepeatMode = controller.repeatMode
-                        _repeatMode.value = controllerRepeatMode
-                        
-                        // Restore saved shuffle and repeat states if not currently playing and persistence is enabled
-                        if (!controller.isPlaying) {
-                            if (appSettings.shuffleModePersistence.value) {
-                                val savedShuffle = appSettings.savedShuffleState.value
-                                val useExoPlayerShuffle = appSettings.shuffleUsesExoplayer.value
-                                val targetControllerShuffle = savedShuffle && useExoPlayerShuffle
 
-                                Log.d(
-                                    TAG,
-                                    "Restoring saved shuffle state: $savedShuffle (useExoPlayerShuffle=$useExoPlayerShuffle, controllerTarget=$targetControllerShuffle)"
-                                )
+        try {
+            controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+            controllerFuture?.addListener({
+                try {
+                    mediaController = controllerFuture?.get()
+                    Log.d(TAG, "Media controller initialized: $mediaController")
 
-                                if (controller.shuffleModeEnabled != targetControllerShuffle) {
-                                    controller.shuffleModeEnabled = targetControllerShuffle
+                    if (mediaController != null) {
+                        mediaController?.addListener(playerListener)
+                        _serviceConnected.value = true
+
+                        // Update shuffle and repeat mode from controller
+                        mediaController?.let { controller ->
+                            _isShuffleEnabled.value = controller.shuffleModeEnabled
+                            val controllerRepeatMode = controller.repeatMode
+                            _repeatMode.value = controllerRepeatMode
+
+                            // Restore saved shuffle and repeat states if not currently playing and persistence is enabled
+                            if (!controller.isPlaying) {
+                                if (appSettings.shuffleModePersistence.value) {
+                                    val savedShuffle = appSettings.savedShuffleState.value
+                                    val useExoPlayerShuffle = appSettings.shuffleUsesExoplayer.value
+                                    val targetControllerShuffle = savedShuffle && useExoPlayerShuffle
+
+                                    Log.d(
+                                        TAG,
+                                        "Restoring saved shuffle state: $savedShuffle (useExoPlayerShuffle=$useExoPlayerShuffle, controllerTarget=$targetControllerShuffle)"
+                                    )
+
+                                    if (controller.shuffleModeEnabled != targetControllerShuffle) {
+                                        controller.shuffleModeEnabled = targetControllerShuffle
+                                    }
+
+                                    // In manual shuffle mode, keep UI state from persisted value while controller shuffle stays off.
+                                    _isShuffleEnabled.value = if (useExoPlayerShuffle) targetControllerShuffle else savedShuffle
                                 }
 
-                                // In manual shuffle mode, keep UI state from persisted value while controller shuffle stays off.
-                                _isShuffleEnabled.value = if (useExoPlayerShuffle) targetControllerShuffle else savedShuffle
-                            }
-                            
-                            if (appSettings.repeatModePersistence.value) {
-                                val savedRepeat = appSettings.savedRepeatMode.value
-                                Log.d(TAG, "Restoring saved repeat mode: $savedRepeat")
-                                
-                                if (controller.repeatMode != savedRepeat) {
-                                    controller.repeatMode = savedRepeat
-                                    _repeatMode.value = savedRepeat
+                                if (appSettings.repeatModePersistence.value) {
+                                    val savedRepeat = appSettings.savedRepeatMode.value
+                                    Log.d(TAG, "Restoring saved repeat mode: $savedRepeat")
+
+                                    if (controller.repeatMode != savedRepeat) {
+                                        controller.repeatMode = savedRepeat
+                                        _repeatMode.value = savedRepeat
+                                    }
                                 }
                             }
+
+                            // Restore saved playback speed and pitch
+                            val savedSpeed = appSettings.playbackSpeed.value
+                            val savedPitch = appSettings.playbackPitch.value
+                            Log.d(TAG, "Restoring saved playback speed: $savedSpeed, pitch: $savedPitch")
+                            if (controller.playbackParameters.speed != savedSpeed || controller.playbackParameters.pitch != savedPitch) {
+                                controller.playbackParameters = androidx.media3.common.PlaybackParameters(savedSpeed, savedPitch)
+                            }
+
+                            Log.d(TAG, "Initial repeat mode from controller: $controllerRepeatMode (${
+                            when(controllerRepeatMode) {
+                                Player.REPEAT_MODE_OFF -> "OFF"
+                                Player.REPEAT_MODE_ONE -> "ONE"
+                                Player.REPEAT_MODE_ALL -> "ALL"
+                                else -> "UNKNOWN"
+                            }
+                        })")
+
+                            // Sync playback state with controller when app is reopened
+                            val isActuallyPlaying = controller.isPlaying
+                            _isPlaying.value = isActuallyPlaying
+                            Log.d(TAG, "Syncing playback state on controller init: isPlaying=$isActuallyPlaying")
+
+                            // Update duration and start progress updates if playing
+                            if (isActuallyPlaying) {
+                                _duration.value = controller.duration
+                                startProgressUpdates()
+                            }
                         }
-                        
-                        // Restore saved playback speed and pitch
-                        val savedSpeed = appSettings.playbackSpeed.value
-                        val savedPitch = appSettings.playbackPitch.value
-                        Log.d(TAG, "Restoring saved playback speed: $savedSpeed, pitch: $savedPitch")
-                        if (controller.playbackParameters.speed != savedSpeed || controller.playbackParameters.pitch != savedPitch) {
-                            controller.playbackParameters = androidx.media3.common.PlaybackParameters(savedSpeed, savedPitch)
+
+                        // Check if we have a current song after initializing controller
+                        updateCurrentSong()
+
+                        // Restore queue if persistence is enabled and queue exists
+                        restoreQueueAfterControllerReady()
+
+                        // Debug the queue state after initialization
+                        debugQueueState()
+
+                        // Check if we have a pending queue to play
+                        pendingQueueToPlay?.let { songs ->
+                            Log.d(TAG, "Playing pending queue with ${songs.size} songs")
+                            playQueue(songs)
+                            pendingQueueToPlay = null
                         }
-                        
-                        Log.d(TAG, "Initial repeat mode from controller: $controllerRepeatMode (${
-                        when(controllerRepeatMode) {
-                            Player.REPEAT_MODE_OFF -> "OFF"
-                            Player.REPEAT_MODE_ONE -> "ONE"
-                            Player.REPEAT_MODE_ALL -> "ALL"
-                            else -> "UNKNOWN"
-                        }
-                    })")
-                    
-                    // Sync playback state with controller when app is reopened
-                    val isActuallyPlaying = controller.isPlaying
-                    _isPlaying.value = isActuallyPlaying
-                    Log.d(TAG, "Syncing playback state on controller init: isPlaying=$isActuallyPlaying")
-                    
-                    // Update duration and start progress updates if playing
-                    if (isActuallyPlaying) {
-                        _duration.value = controller.duration
-                        startProgressUpdates()
+
+                        resumePlaybackAfterRhythmGuardTimeoutIfNeeded(source = "controller connected")
+                    } else {
+                        _serviceConnected.value = false
+                        Log.e(TAG, "Failed to get media controller")
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error initializing media controller", e)
+                    _serviceConnected.value = false
+                } finally {
+                    controllerConnectInFlight.set(false)
                 }
-                
-                // Check if we have a current song after initializing controller
-                updateCurrentSong()
-                
-                // Restore queue if persistence is enabled and queue exists
-                restoreQueueAfterControllerReady()
-                
-                // Debug the queue state after initialization
-                debugQueueState()
-                
-                // Check if we have a pending queue to play
-                pendingQueueToPlay?.let { songs ->
-                    Log.d(TAG, "Playing pending queue with ${songs.size} songs")
-                    playQueue(songs)
-                    pendingQueueToPlay = null
-                }
-
-                resumePlaybackAfterRhythmGuardTimeoutIfNeeded(source = "controller connected")
-            } else {
-                _serviceConnected.value = false
-                Log.e(TAG, "Failed to get media controller")
-            }
+            }, MoreExecutors.directExecutor())
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing media controller", e)
+            Log.e(TAG, "Error building media controller future", e)
             _serviceConnected.value = false
+            controllerConnectInFlight.set(false)
         }
-        }, MoreExecutors.directExecutor())
+    }
+
+    private fun releaseStaleControllerConnection() {
+        mediaController?.let { existingController ->
+            try {
+                existingController.removeListener(playerListener)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error removing listener from stale controller", e)
+            }
+
+            try {
+                existingController.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing stale controller", e)
+            }
+        }
+        mediaController = null
+
+        controllerFuture?.let { existingFuture ->
+            try {
+                MediaController.releaseFuture(existingFuture)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing stale controller future", e)
+            }
+        }
+        controllerFuture = null
+        _serviceConnected.value = false
     }
     
     // Private initialization method (called from init)
@@ -3098,6 +3654,36 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     .build()
             )
             .build()
+    }
+
+    private fun mediaItemToTransientSong(mediaItem: MediaItem): Song? {
+        val mediaId = mediaItem.mediaId
+        val metadata = mediaItem.mediaMetadata
+
+        val title = metadata.title?.toString()?.takeIf { it.isNotBlank() } ?: return null
+        val artist = metadata.artist?.toString().orEmpty().ifBlank { "Unknown Artist" }
+        val album = metadata.albumTitle?.toString().orEmpty().ifBlank { "Unknown Album" }
+
+        return Song(
+            id = if (mediaId.isNotBlank()) mediaId else "external_${title.hashCode()}",
+            title = title,
+            artist = artist,
+            album = album,
+            albumId = "",
+            duration = mediaController?.duration?.takeIf { it > 0 } ?: 0L,
+            uri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY,
+            artworkUri = metadata.artworkUri,
+            trackNumber = 0,
+            year = 0,
+            genre = null,
+            dateAdded = System.currentTimeMillis(),
+            albumArtist = null,
+            bitrate = null,
+            sampleRate = null,
+            channels = null,
+            codec = null,
+            discNumber = 1
+        )
     }
 
     private fun resolveQueueOccurrenceForSong(songId: String, queueIndex: Int): Int {
@@ -5195,10 +5781,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         onResult: (Result<String>) -> Unit
     ) {
         viewModelScope.launch {
+            val context = getApplication<Application>()
+            showOperationProgressNotification(
+                notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                title = context.getString(R.string.notification_playlist_export_title),
+                content = context.getString(R.string.operation_exporting_playlists),
+                indeterminate = true
+            )
+
             try {
                 val playlist = _playlists.value.find { it.id == playlistId }
                 if (playlist == null) {
                     onResult(Result.failure(IllegalArgumentException("Playlist not found")))
+                    showOperationResultNotification(
+                        notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                        title = context.getString(R.string.notification_playlist_export_title),
+                        content = context.getString(R.string.notification_playlist_not_found),
+                        isError = true,
+                        autoDismissMs = 8000L
+                    )
                     return@launch
                 }
                 
@@ -5213,16 +5814,37 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 
                 result.fold(
                     onSuccess = { file ->
-                        onResult(Result.success("Playlist '${playlist.name}' exported to ${file.absolutePath}"))
+                        val message = "Playlist '${playlist.name}' exported to ${file.absolutePath}"
+                        onResult(Result.success(message))
+                        showOperationResultNotification(
+                            notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                            title = context.getString(R.string.notification_playlist_export_title),
+                            content = context.getString(R.string.notification_playlist_export_complete),
+                            isError = false
+                        )
                         Log.d(TAG, "Successfully exported playlist: ${playlist.name}")
                     },
                     onFailure = { exception ->
                         onResult(Result.failure(exception))
+                        showOperationResultNotification(
+                            notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                            title = context.getString(R.string.notification_playlist_export_title),
+                            content = context.getString(R.string.notification_playlist_export_failed),
+                            isError = true,
+                            autoDismissMs = 8000L
+                        )
                         Log.e(TAG, "Failed to export playlist: ${playlist.name}", exception)
                     }
                 )
             } catch (e: Exception) {
                 onResult(Result.failure(e))
+                showOperationResultNotification(
+                    notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                    title = context.getString(R.string.notification_playlist_export_title),
+                    content = context.getString(R.string.notification_playlist_export_failed),
+                    isError = true,
+                    autoDismissMs = 8000L
+                )
                 Log.e(TAG, "Error in exportPlaylist", e)
             }
         }
@@ -5238,6 +5860,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         onResult: (Result<String>) -> Unit
     ) {
         viewModelScope.launch {
+            val context = getApplication<Application>()
+            val operationText = if (userSelectedDirectoryUri != null) {
+                context.getString(R.string.operation_exporting_playlists_location)
+            } else {
+                context.getString(R.string.operation_exporting_playlists)
+            }
+            showOperationProgressNotification(
+                notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                title = context.getString(R.string.notification_playlist_export_title),
+                content = operationText,
+                indeterminate = true
+            )
+
             try {
                 Log.d(TAG, "Starting export all playlists operation")
                 
@@ -5251,6 +5886,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (playlistsToExport.isEmpty()) {
                     Log.w(TAG, "No playlists to export")
                     onResult(Result.failure(IllegalStateException("No playlists available to export")))
+                    showOperationResultNotification(
+                        notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                        title = context.getString(R.string.notification_playlist_export_title),
+                        content = context.getString(R.string.notification_no_playlists_to_export),
+                        isError = true,
+                        autoDismissMs = 8000L
+                    )
                     return@launch
                 }
                 
@@ -5270,23 +5912,55 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 
                 if (result == null) {
                     Log.e(TAG, "Export operation timed out")
-                    onResult(Result.failure(Exception("Export operation timed out after 30 seconds")))
+                    val timeoutError = Exception("Export operation timed out after 30 seconds")
+                    onResult(Result.failure(timeoutError))
+                    showOperationResultNotification(
+                        notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                        title = context.getString(R.string.notification_playlist_export_title),
+                        content = context.getString(R.string.notification_operation_timed_out),
+                        isError = true,
+                        autoDismissMs = 8000L
+                    )
                     return@launch
                 }
                 
                 result.fold(
                     onSuccess = { file ->
                         Log.d(TAG, "Successfully exported ${playlistsToExport.size} playlists to ${file.absolutePath}")
-                        onResult(Result.success("Successfully exported ${playlistsToExport.size} playlists to ${file.absolutePath}"))
+                        val message = "Successfully exported ${playlistsToExport.size} playlists to ${file.absolutePath}"
+                        onResult(Result.success(message))
+                        showOperationResultNotification(
+                            notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                            title = context.getString(R.string.notification_playlist_export_title),
+                            content = context.getString(
+                                R.string.notification_playlist_export_all_complete,
+                                playlistsToExport.size
+                            ),
+                            isError = false
+                        )
                     },
                     onFailure = { exception ->
                         Log.e(TAG, "Failed to export all playlists", exception)
                         onResult(Result.failure(exception))
+                        showOperationResultNotification(
+                            notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                            title = context.getString(R.string.notification_playlist_export_title),
+                            content = context.getString(R.string.notification_playlist_export_failed),
+                            isError = true,
+                            autoDismissMs = 8000L
+                        )
                     }
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Error in exportAllPlaylists", e)
                 onResult(Result.failure(e))
+                showOperationResultNotification(
+                    notificationId = PLAYLIST_EXPORT_NOTIFICATION_ID,
+                    title = context.getString(R.string.notification_playlist_export_title),
+                    content = context.getString(R.string.notification_playlist_export_failed),
+                    isError = true,
+                    autoDismissMs = 8000L
+                )
             }
         }
     }
@@ -5300,6 +5974,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         onRestartRequired: (() -> Unit)? = null
     ) {
         viewModelScope.launch {
+            val context = getApplication<Application>()
+            showOperationProgressNotification(
+                notificationId = PLAYLIST_IMPORT_NOTIFICATION_ID,
+                title = context.getString(R.string.notification_playlist_import_title),
+                content = context.getString(R.string.operation_importing_playlist),
+                indeterminate = true
+            )
+
             try {
                 Log.d(TAG, "Starting import playlist operation from URI: $uri")
                 
@@ -5316,7 +5998,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 
                 if (result == null) {
                     Log.e(TAG, "Import operation timed out")
-                    onResult(Result.failure(Exception("Import operation timed out after 30 seconds")))
+                    val timeoutError = Exception("Import operation timed out after 30 seconds")
+                    onResult(Result.failure(timeoutError))
+                    showOperationResultNotification(
+                        notificationId = PLAYLIST_IMPORT_NOTIFICATION_ID,
+                        title = context.getString(R.string.notification_playlist_import_title),
+                        content = context.getString(R.string.notification_operation_timed_out),
+                        isError = true,
+                        autoDismissMs = 8000L
+                    )
                     return@launch
                 }
                 
@@ -5339,7 +6029,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         
                         val matchedCount = finalPlaylist.songs.size
                         Log.d(TAG, "Successfully imported playlist: ${finalPlaylist.name} with $matchedCount songs")
-                        onResult(Result.success("Successfully imported playlist '${finalPlaylist.name}' with $matchedCount songs. App restart recommended for best experience."))
+                        val message = "Successfully imported playlist '${finalPlaylist.name}' with $matchedCount songs. App restart recommended for best experience."
+                        onResult(Result.success(message))
+                        showOperationResultNotification(
+                            notificationId = PLAYLIST_IMPORT_NOTIFICATION_ID,
+                            title = context.getString(R.string.notification_playlist_import_title),
+                            content = context.getString(
+                                R.string.notification_playlist_import_complete,
+                                finalPlaylist.name,
+                                matchedCount
+                            ),
+                            isError = false
+                        )
                         
                         // Recommend app restart for imported playlists to ensure proper UI update
                         onRestartRequired?.invoke()
@@ -5347,11 +6048,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     onFailure = { exception ->
                         Log.e(TAG, "Failed to import playlist from $uri", exception)
                         onResult(Result.failure(exception))
+                        showOperationResultNotification(
+                            notificationId = PLAYLIST_IMPORT_NOTIFICATION_ID,
+                            title = context.getString(R.string.notification_playlist_import_title),
+                            content = context.getString(R.string.notification_playlist_import_failed),
+                            isError = true,
+                            autoDismissMs = 8000L
+                        )
                     }
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Error in importPlaylist", e)
                 onResult(Result.failure(e))
+                showOperationResultNotification(
+                    notificationId = PLAYLIST_IMPORT_NOTIFICATION_ID,
+                    title = context.getString(R.string.notification_playlist_import_title),
+                    content = context.getString(R.string.notification_playlist_import_failed),
+                    isError = true,
+                    autoDismissMs = 8000L
+                )
             }
         }
     }
@@ -7087,20 +7802,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val mediaItemSongs = mediaItems.mapNotNull { mediaItem ->
-                    _songs.value.find { it.id == mediaItem.mediaId }
+                    _songs.value.find { it.id == mediaItem.mediaId } ?: mediaItemToTransientSong(mediaItem)
                 }
 
                 val currentMediaId = controller.currentMediaItem?.mediaId
-                val currentMediaIndex = currentMediaId
+                val rawCurrentMediaIndex = currentMediaId
                     ?.let { id -> mediaItemSongs.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
                     ?: controller.currentMediaItemIndex.coerceAtLeast(0)
+                val currentMediaIndex = if (mediaItemSongs.isEmpty()) {
+                    -1
+                } else {
+                    rawCurrentMediaIndex.coerceIn(0, mediaItemSongs.lastIndex)
+                }
                 _currentQueue.value = Queue(mediaItemSongs, currentMediaIndex)
 
                 // Update current song if needed
-                if (mediaItemSongs.isNotEmpty() && currentMediaIndex < mediaItemSongs.size) {
+                if (mediaItemSongs.isNotEmpty() && currentMediaIndex >= 0 && currentMediaIndex < mediaItemSongs.size) {
                     val currentSong = mediaItemSongs[currentMediaIndex]
                     _currentSong.value = currentSong
                     _isFavorite.value = _favoriteSongs.value.contains(currentSong.id)
+                } else if (mediaItemSongs.isEmpty()) {
+                    _currentSong.value = null
                 }
 
                 Log.d(TAG, "Synced queue: ${mediaItemSongs.size} songs, index: $currentMediaIndex, shuffle: ${controller.shuffleModeEnabled}")
@@ -7255,33 +7977,62 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun startSleepTimer(minutes: Int, action: SleepAction) {
         // Stop any existing timer first
         stopSleepTimer()
-        
-        val totalSeconds = minutes * 60L
+
+        val safeMinutes = minutes.coerceAtLeast(1)
+        val totalSeconds = safeMinutes * 60L
+        val totalDurationMs = totalSeconds * 1000L
         _sleepTimerActive.value = true
         _sleepTimerRemainingSeconds.value = totalSeconds
         _sleepTimerAction.value = action.name
-        
-        Log.d(TAG, "Starting sleep timer: ${minutes} minutes, action: ${action.name}")
-        
+
+        Log.d(TAG, "Starting sleep timer: ${safeMinutes} minutes, action: ${action.name}")
+
+        val (fadeOut, pauseOnly) = when (action) {
+            SleepAction.FADE_OUT -> true to true
+            SleepAction.PAUSE -> false to true
+            SleepAction.STOP -> false to false
+        }
+
+        val context = getApplication<Application>()
+        val serviceIntent = Intent(context, MediaPlaybackService::class.java).apply {
+            this.action = MediaPlaybackService.ACTION_START_SLEEP_TIMER
+            putExtra("duration", totalDurationMs)
+            putExtra("fadeOut", fadeOut)
+            putExtra("pauseOnly", pauseOnly)
+        }
+
+        var serviceCommandSent = false
+        try {
+            context.startService(serviceIntent)
+            serviceCommandSent = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start service-backed sleep timer, using local fallback", e)
+        }
+
+        if (serviceCommandSent) {
+            return
+        }
+
+        // Fallback: maintain local timer behavior if service command fails.
         sleepTimerJob = viewModelScope.launch {
             var remaining = totalSeconds
-            
+
             while (remaining > 0 && _sleepTimerActive.value) {
                 delay(1000) // Wait 1 second
                 remaining--
                 _sleepTimerRemainingSeconds.value = remaining
             }
-            
+
             // Timer finished, execute action
             if (_sleepTimerActive.value && remaining <= 0) {
                 Log.d(TAG, "Sleep timer finished, executing action: ${action.name}")
-                
+
                 when (action) {
                     SleepAction.FADE_OUT -> fadeOutAndPause()
                     SleepAction.PAUSE -> pauseMusic()
                     SleepAction.STOP -> stopMusic()
                 }
-                
+
                 // Reset timer state
                 _sleepTimerActive.value = false
                 _sleepTimerRemainingSeconds.value = 0L
@@ -7295,6 +8046,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         sleepTimerJob = null
         _sleepTimerActive.value = false
         _sleepTimerRemainingSeconds.value = 0L
+
+        val context = getApplication<Application>()
+        val serviceIntent = Intent(context, MediaPlaybackService::class.java).apply {
+            this.action = MediaPlaybackService.ACTION_STOP_SLEEP_TIMER
+        }
+
+        try {
+            context.startService(serviceIntent)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to stop service-backed sleep timer", e)
+        }
     }
     
     // Equalizer functionality
@@ -7631,7 +8393,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     
     private var sleepTimerJob: kotlinx.coroutines.Job? = null
     
-    // Sleep timer now uses direct ViewModel state management instead of broadcast receivers
+    // Sleep timer state is synchronized from service status broadcasts.
     
     override fun onCleared() {
         super.onCleared()
@@ -7656,12 +8418,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // Cancel ongoing scan and lyrics fetch
         scanJob?.cancel()
         lyricsFetchJob?.cancel()
+        clearOperationNotifications()
         
         // Cancel progress updates
         progressUpdateJob?.cancel()
         
         // Remove player listener before releasing MediaController
         mediaController?.removeListener(playerListener)
+        controllerConnectInFlight.set(false)
         
         // Release MediaController
         mediaController?.release()

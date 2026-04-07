@@ -1,5 +1,10 @@
 package chromahub.rhythm.app.shared.presentation.navigation
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.os.Build
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseInOutQuart
@@ -49,7 +54,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -82,6 +86,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.viewmodel.compose.viewModel
+import chromahub.rhythm.app.activities.MainActivity
 import chromahub.rhythm.app.activities.RhythmGuardTimeoutActivity
 import chromahub.rhythm.app.R
 import chromahub.rhythm.app.core.domain.model.AppMode
@@ -90,10 +95,12 @@ import chromahub.rhythm.app.features.streaming.presentation.navigation.Streaming
 import chromahub.rhythm.app.shared.data.repository.UserPreferencesRepository
 import chromahub.rhythm.app.shared.data.repository.PlaybackStatsRepository
 import chromahub.rhythm.app.shared.data.repository.StatsTimeRange
+import chromahub.rhythm.app.shared.presentation.components.common.RhythmWavyProgressLoader
 import chromahub.rhythm.app.shared.presentation.viewmodel.AppModeViewModel
 import chromahub.rhythm.app.features.local.presentation.viewmodel.MusicViewModel
 import chromahub.rhythm.app.shared.presentation.viewmodel.ThemeViewModel
 import chromahub.rhythm.app.shared.data.model.AppSettings
+import androidx.core.app.NotificationCompat
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -120,14 +127,18 @@ fun RhythmNavigation(
     // Navigate to settings when triggered
     LaunchedEffect(navigateToSettingsTrigger) {
         if (navigateToSettingsTrigger) {
-            rootNavController.navigate("settings")
+            rootNavController.navigate("settings") {
+                launchSingleTop = true
+            }
             onSettingsNavigationComplete?.invoke()
         }
     }
     
     // Settings navigation callback that works for both modes
     val navigateToSettings: () -> Unit = {
-        rootNavController.navigate("settings")
+        rootNavController.navigate("settings") {
+            launchSingleTop = true
+        }
     }
     
     // Switch between Local and Streaming navigation based on app mode with animated transitions.
@@ -186,7 +197,12 @@ fun RhythmNavigation(
             composable("settings") {
                 chromahub.rhythm.app.features.local.presentation.screens.settings.SettingsScreenWrapper(
                     onBack = {
-                        rootNavController.popBackStack()
+                        val popped = rootNavController.popBackStack()
+                        if (!popped) {
+                            rootNavController.navigate("main") {
+                                launchSingleTop = true
+                            }
+                        }
                     },
                     appSettings = appSettings,
                     navController = rootNavController,
@@ -214,6 +230,11 @@ enum class RhythmGuardRiskLevel {
     SEVERE
 }
 
+private const val RHYTHM_GUARD_ALERT_CHANNEL_ID = "rhythm_guard_alerts"
+private const val RHYTHM_GUARD_TIMER_CHANNEL_ID = "rhythm_guard_timers"
+private const val RHYTHM_GUARD_ALERT_NOTIFICATION_ID = 1301
+private const val RHYTHM_GUARD_TIMER_NOTIFICATION_ID = 1302
+
 private data class RhythmGuardVolumeWarningDialogState(
     val mode: String,
     val currentVolumePercent: Int,
@@ -240,6 +261,8 @@ private fun RhythmGuardWarningHost(
     val auraMode by appSettings.rhythmGuardMode.collectAsState()
     val auraAge by appSettings.rhythmGuardAge.collectAsState()
     val manualWarningsEnabled by appSettings.rhythmGuardManualWarningsEnabled.collectAsState()
+    val alertNotificationsEnabled by appSettings.rhythmGuardAlertNotificationsEnabled.collectAsState()
+    val timerNotificationsEnabled by appSettings.rhythmGuardTimerNotificationsEnabled.collectAsState()
     val manualVolumeThreshold by appSettings.rhythmGuardManualVolumeThreshold.collectAsState()
     val configuredAlertThresholdMinutes by appSettings.rhythmGuardAlertThresholdMinutes.collectAsState()
     val warningTimeoutMinutes by appSettings.rhythmGuardWarningTimeoutMinutes.collectAsState()
@@ -350,6 +373,19 @@ private fun RhythmGuardWarningHost(
         pendingBreakStartAtMs = 0L
         pendingBreakStartCountdownSeconds = 0L
         breakDialogState = null
+
+        if (timerNotificationsEnabled) {
+            showRhythmGuardTimerNotification(
+                context = context,
+                title = context.getString(R.string.settings_rhythm_guard_notification_timer_active_title),
+                text = context.getString(
+                    R.string.settings_rhythm_guard_notification_timer_active_text,
+                    rhythmGuardFormatCountdown(safeBreakMinutes.toLong() * 60L)
+                ),
+                remainingSeconds = safeBreakMinutes.toLong() * 60L,
+                totalSeconds = safeBreakMinutes.toLong() * 60L
+            )
+        }
     }
 
     val delayBreakReminder: (Int) -> Unit = { requestedMinutes ->
@@ -362,6 +398,28 @@ private fun RhythmGuardWarningHost(
         pendingBreakStartCountdownSeconds = (delayMs / 1000L).coerceAtLeast(0L)
         breakDelayMinutes = safeDelayMinutes
         breakDialogState = null
+
+        if (timerNotificationsEnabled) {
+            showRhythmGuardTimerNotification(
+                context = context,
+                title = context.getString(R.string.settings_rhythm_guard_notification_timer_scheduled_title),
+                text = context.getString(
+                    R.string.settings_rhythm_guard_notification_timer_scheduled_text,
+                    rhythmGuardFormatCountdown(safeDelayMinutes.toLong() * 60L)
+                ),
+                remainingSeconds = safeDelayMinutes.toLong() * 60L,
+                totalSeconds = safeDelayMinutes.toLong() * 60L
+            )
+        }
+    }
+
+    LaunchedEffect(alertNotificationsEnabled, timerNotificationsEnabled) {
+        if (!alertNotificationsEnabled) {
+            cancelRhythmGuardAlertNotification(context)
+        }
+        if (!timerNotificationsEnabled) {
+            cancelRhythmGuardTimerNotification(context)
+        }
     }
 
     LaunchedEffect(dailyListeningStats, songsPlayed, listeningTime) {
@@ -389,12 +447,16 @@ private fun RhythmGuardWarningHost(
             lastTimeoutTriggeredExposureMinutes = -1
             lastAutoClampAtMs = 0L
             lastAutoClampThresholdPercent = -1
+            cancelRhythmGuardAlertNotification(context)
+            cancelRhythmGuardTimerNotification(context)
         }
         if (currentSong == null) {
             volumeDialogState = null
             breakDialogState = null
             pendingBreakStartAtMs = 0L
             pendingBreakStartCountdownSeconds = 0L
+            cancelRhythmGuardAlertNotification(context)
+            cancelRhythmGuardTimerNotification(context)
         }
         if (auraMode == AppSettings.RHYTHM_GUARD_MODE_MANUAL && !manualWarningsEnabled) {
             volumeDialogState = null
@@ -411,6 +473,7 @@ private fun RhythmGuardWarningHost(
     ) {
         val now = System.currentTimeMillis()
         if (timeoutUntilMs <= now) {
+            cancelRhythmGuardTimerNotification(context)
             if (timeoutUntilMs > 0L) {
                 val cooldownUntil = now + postTimeoutCooldownMinutes.coerceIn(1, 60) * 60_000L
                 appSettings.setRhythmGuardTimeoutCooldownUntilMs(cooldownUntil)
@@ -431,10 +494,25 @@ private fun RhythmGuardWarningHost(
             timeoutStartedAtMs = timeoutUntilMs - configuredBreakResumeMinutes.coerceIn(1, 180) * 60_000L
         }
 
+        val totalTimeoutSeconds = ((timeoutUntilMs - timeoutStartedAtMs) / 1000L)
+            .coerceAtLeast(1L)
+
         while (true) {
             val remainingSeconds = ((timeoutUntilMs - System.currentTimeMillis()) / 1000L)
                 .coerceAtLeast(0L)
             resumeCountdownSeconds = remainingSeconds
+            if (timerNotificationsEnabled) {
+                showRhythmGuardTimerNotification(
+                    context = context,
+                    title = context.getString(R.string.settings_rhythm_guard_notification_timer_active_title),
+                    text = context.getString(
+                        R.string.settings_rhythm_guard_notification_timer_active_text,
+                        rhythmGuardFormatCountdown(remainingSeconds)
+                    ),
+                    remainingSeconds = remainingSeconds,
+                    totalSeconds = totalTimeoutSeconds
+                )
+            }
             if (remainingSeconds <= 0L) break
             delay(1000)
         }
@@ -447,6 +525,7 @@ private fun RhythmGuardWarningHost(
             musicViewModel.resumePlaybackAfterRhythmGuardTimeoutIfNeeded(
                 source = "timeout effect countdown-finished"
             )
+            cancelRhythmGuardTimerNotification(context)
         }
         resumeCountdownSeconds = 0L
         timeoutStartedAtMs = 0L
@@ -472,10 +551,24 @@ private fun RhythmGuardWarningHost(
             return@LaunchedEffect
         }
 
+        val totalDelaySeconds = pendingBreakStartCountdownSeconds.coerceAtLeast(1L)
+
         while (true) {
             val now = System.currentTimeMillis()
             val remainingSeconds = ((pendingBreakStartAtMs - now) / 1000L).coerceAtLeast(0L)
             pendingBreakStartCountdownSeconds = remainingSeconds
+            if (timerNotificationsEnabled) {
+                showRhythmGuardTimerNotification(
+                    context = context,
+                    title = context.getString(R.string.settings_rhythm_guard_notification_timer_scheduled_title),
+                    text = context.getString(
+                        R.string.settings_rhythm_guard_notification_timer_scheduled_text,
+                        rhythmGuardFormatCountdown(remainingSeconds)
+                    ),
+                    remainingSeconds = remainingSeconds,
+                    totalSeconds = totalDelaySeconds
+                )
+            }
             if (remainingSeconds <= 0L) break
             delay(1000L)
         }
@@ -521,7 +614,9 @@ private fun RhythmGuardWarningHost(
         activeThresholdPercent,
         todayExposureMinutes,
         effectiveExposureLimitMinutes,
-        warningTimeoutMinutes
+        warningTimeoutMinutes,
+        alertNotificationsEnabled,
+        timerNotificationsEnabled
     ) {
         if (!rulesEnabled) {
             volumeDialogState = null
@@ -583,20 +678,41 @@ private fun RhythmGuardWarningHost(
         if (canShow && volumeDialogState == null && breakDialogState == null) {
             when (warningType) {
                 RhythmGuardWarningType.VOLUME -> {
+                    val riskLevel = rhythmGuardResolveRiskLevel(
+                        currentVolumePercent = currentVolumePercent,
+                        safeThresholdPercent = activeThresholdPercent,
+                        exposureMinutes = todayExposureMinutes,
+                        exposureLimitMinutes = effectiveExposureLimitMinutes
+                    )
                     volumeDialogState = RhythmGuardVolumeWarningDialogState(
                         mode = auraMode,
                         currentVolumePercent = currentVolumePercent,
                         safeThresholdPercent = activeThresholdPercent,
                         suggestedVolume = activeThreshold,
-                        riskLevel = rhythmGuardResolveRiskLevel(
-                            currentVolumePercent = currentVolumePercent,
-                            safeThresholdPercent = activeThresholdPercent,
-                            exposureMinutes = todayExposureMinutes,
-                            exposureLimitMinutes = effectiveExposureLimitMinutes
-                        )
+                        riskLevel = riskLevel
                     )
+
+                    if (alertNotificationsEnabled) {
+                        showRhythmGuardAlertNotification(
+                            context = context,
+                            title = context.getString(R.string.settings_rhythm_guard_notification_alert_title),
+                            text = context.getString(
+                                R.string.settings_rhythm_guard_warning_dialog_volume_message,
+                                currentVolumePercent,
+                                activeThresholdPercent
+                            ),
+                            riskLevel = riskLevel
+                        )
+                    }
                 }
                 RhythmGuardWarningType.EXPOSURE -> {
+                    val riskLevel = rhythmGuardResolveRiskLevel(
+                        currentVolumePercent = currentVolumePercent,
+                        safeThresholdPercent = activeThresholdPercent,
+                        exposureMinutes = todayExposureMinutes,
+                        exposureLimitMinutes = effectiveExposureLimitMinutes
+                    )
+
                     if (auraMode == AppSettings.RHYTHM_GUARD_MODE_AUTO) {
                         val now = System.currentTimeMillis()
                         val safeBreakMinutes = configuredBreakResumeMinutes.coerceIn(1, 180)
@@ -621,18 +737,52 @@ private fun RhythmGuardWarningHost(
                             timeoutUntilMs = timeoutEnd,
                             timeoutStartedAtMs = now
                         )
+
+                        if (alertNotificationsEnabled) {
+                            showRhythmGuardAlertNotification(
+                                context = context,
+                                title = context.getString(R.string.settings_rhythm_guard_notification_alert_title),
+                                text = context.getString(
+                                    R.string.settings_rhythm_guard_break_dialog_message,
+                                    formattedTodayExposure,
+                                    formattedExposureLimit
+                                ),
+                                riskLevel = riskLevel
+                            )
+                        }
+
+                        if (timerNotificationsEnabled) {
+                            showRhythmGuardTimerNotification(
+                                context = context,
+                                title = context.getString(R.string.settings_rhythm_guard_notification_timer_active_title),
+                                text = context.getString(
+                                    R.string.settings_rhythm_guard_notification_timer_active_text,
+                                    rhythmGuardFormatCountdown(safeBreakMinutes.toLong() * 60L)
+                                ),
+                                remainingSeconds = safeBreakMinutes.toLong() * 60L,
+                                totalSeconds = safeBreakMinutes.toLong() * 60L
+                            )
+                        }
                     } else {
                         breakDialogState = RhythmGuardBreakDialogState(
                             mode = auraMode,
                             estimatedTodayMinutes = todayExposureMinutes,
                             recommendedDailyMinutes = effectiveExposureLimitMinutes,
-                            riskLevel = rhythmGuardResolveRiskLevel(
-                                currentVolumePercent = currentVolumePercent,
-                                safeThresholdPercent = activeThresholdPercent,
-                                exposureMinutes = todayExposureMinutes,
-                                exposureLimitMinutes = effectiveExposureLimitMinutes
-                            )
+                            riskLevel = riskLevel
                         )
+
+                        if (alertNotificationsEnabled) {
+                            showRhythmGuardAlertNotification(
+                                context = context,
+                                title = context.getString(R.string.settings_rhythm_guard_notification_alert_title),
+                                text = context.getString(
+                                    R.string.settings_rhythm_guard_break_dialog_message,
+                                    formattedTodayExposure,
+                                    formattedExposureLimit
+                                ),
+                                riskLevel = riskLevel
+                            )
+                        }
                     }
                 }
             }
@@ -1070,6 +1220,139 @@ private fun rhythmGuardFormatCountdown(seconds: Long): String {
     }
 }
 
+private fun showRhythmGuardAlertNotification(
+    context: android.content.Context,
+    title: String,
+    text: String,
+    riskLevel: RhythmGuardRiskLevel
+) {
+    val notificationManager =
+        context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+    ensureRhythmGuardNotificationChannels(context, notificationManager)
+
+    val openAppIntent = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(MainActivity.EXTRA_OPEN_PLAYER, true)
+    }
+
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        8101,
+        openAppIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val priority = when (riskLevel) {
+        RhythmGuardRiskLevel.SEVERE,
+        RhythmGuardRiskLevel.HIGH -> NotificationCompat.PRIORITY_HIGH
+        RhythmGuardRiskLevel.MODERATE -> NotificationCompat.PRIORITY_DEFAULT
+        RhythmGuardRiskLevel.LOW -> NotificationCompat.PRIORITY_LOW
+    }
+
+    val notification = NotificationCompat.Builder(context, RHYTHM_GUARD_ALERT_CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        .setCategory(NotificationCompat.CATEGORY_ALARM)
+        .setPriority(priority)
+        .setAutoCancel(true)
+        .setOnlyAlertOnce(true)
+        .setContentIntent(pendingIntent)
+        .build()
+
+    notificationManager.notify(RHYTHM_GUARD_ALERT_NOTIFICATION_ID, notification)
+}
+
+private fun showRhythmGuardTimerNotification(
+    context: android.content.Context,
+    title: String,
+    text: String,
+    remainingSeconds: Long,
+    totalSeconds: Long
+) {
+    val notificationManager =
+        context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+    ensureRhythmGuardNotificationChannels(context, notificationManager)
+
+    val safeTotal = totalSeconds.coerceAtLeast(1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    val safeRemaining = remainingSeconds.coerceIn(0L, safeTotal.toLong()).toInt()
+    val completed = (safeTotal - safeRemaining).coerceIn(0, safeTotal)
+
+    val openAppIntent = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(MainActivity.EXTRA_OPEN_PLAYER, true)
+    }
+
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        8102,
+        openAppIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val notification = NotificationCompat.Builder(context, RHYTHM_GUARD_TIMER_CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setStyle(
+            NotificationCompat.BigTextStyle().bigText(
+                "$text\n${context.getString(R.string.settings_rhythm_guard_notification_tap_open)}"
+            )
+        )
+        .setProgress(safeTotal, completed, false)
+        .setCategory(NotificationCompat.CATEGORY_REMINDER)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setAutoCancel(true)
+        .setOnlyAlertOnce(true)
+        .setSilent(true)
+        .setContentIntent(pendingIntent)
+        .build()
+
+    notificationManager.notify(RHYTHM_GUARD_TIMER_NOTIFICATION_ID, notification)
+}
+
+private fun cancelRhythmGuardTimerNotification(context: android.content.Context) {
+    val notificationManager =
+        context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+    notificationManager.cancel(RHYTHM_GUARD_TIMER_NOTIFICATION_ID)
+}
+
+private fun cancelRhythmGuardAlertNotification(context: android.content.Context) {
+    val notificationManager =
+        context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+    notificationManager.cancel(RHYTHM_GUARD_ALERT_NOTIFICATION_ID)
+}
+
+private fun ensureRhythmGuardNotificationChannels(
+    context: android.content.Context,
+    notificationManager: NotificationManager
+) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+    val alertChannel = NotificationChannel(
+        RHYTHM_GUARD_ALERT_CHANNEL_ID,
+        context.getString(R.string.service_rhythm_guard_alerts),
+        NotificationManager.IMPORTANCE_HIGH
+    ).apply {
+        description = context.getString(R.string.service_rhythm_guard_alerts_desc)
+        enableVibration(true)
+    }
+
+    val timerChannel = NotificationChannel(
+        RHYTHM_GUARD_TIMER_CHANNEL_ID,
+        context.getString(R.string.service_rhythm_guard_timers),
+        NotificationManager.IMPORTANCE_DEFAULT
+    ).apply {
+        description = context.getString(R.string.service_rhythm_guard_timers_desc)
+        enableVibration(false)
+        setShowBadge(false)
+    }
+
+    notificationManager.createNotificationChannel(alertChannel)
+    notificationManager.createNotificationChannel(timerChannel)
+}
+
 @Composable
 private fun RhythmGuardResumeCountdownBubble(
     countdownText: String,
@@ -1080,7 +1363,6 @@ private fun RhythmGuardResumeCountdownBubble(
 ) {
     val context = LocalContext.current
     val progressValue = progress.coerceIn(0f, 1f)
-    val currentProgress by androidx.compose.runtime.rememberUpdatedState(progressValue)
 
     Surface(
         modifier = modifier,
@@ -1098,18 +1380,18 @@ private fun RhythmGuardResumeCountdownBubble(
                 modifier = Modifier.size(34.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularWavyProgressIndicator(
-                    progress = { currentProgress },
+                RhythmWavyProgressLoader(
+                    progress = progressValue,
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
-                )
-                Icon(
-                    imageVector = Icons.Filled.AccessTime,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(16.dp)
-                )
+                    indicatorColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.AccessTime,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(

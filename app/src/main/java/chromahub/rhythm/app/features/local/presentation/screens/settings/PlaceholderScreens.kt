@@ -534,7 +534,26 @@ fun NotificationsSettingsScreen(onBackClick: () -> Unit) {
     val context = LocalContext.current
     val appSettings = AppSettings.getInstance(context)
     val hapticFeedback = LocalHapticFeedback.current
-    val useCustomNotification by appSettings.useCustomNotification.collectAsState()
+    val updateNotificationsEnabled by appSettings.updateNotificationsEnabled.collectAsState()
+    val updateStatusNotificationsEnabled by appSettings.updateStatusNotificationsEnabled.collectAsState()
+    val rhythmGuardAlertNotificationsEnabled by appSettings.rhythmGuardAlertNotificationsEnabled.collectAsState()
+    val rhythmGuardTimerNotificationsEnabled by appSettings.rhythmGuardTimerNotificationsEnabled.collectAsState()
+    val rhythmPulseNotificationsEnabled by appSettings.rhythmPulseNotificationsEnabled.collectAsState()
+    val rhythmPulseNotificationIntervalHours by appSettings.rhythmPulseNotificationIntervalHours.collectAsState()
+
+    val mergedUpdateNotificationsEnabled =
+        updateNotificationsEnabled || updateStatusNotificationsEnabled
+
+    var showPulseIntervalDialog by remember { mutableStateOf(false) }
+
+    val pulseIntervalLabel = when (rhythmPulseNotificationIntervalHours) {
+        6 -> context.getString(R.string.settings_interval_every_6_hours)
+        12 -> context.getString(R.string.settings_interval_every_12_hours)
+        24 -> context.getString(R.string.settings_interval_once_a_day)
+        48 -> context.getString(R.string.settings_interval_every_48_hours)
+        72 -> context.getString(R.string.settings_interval_every_72_hours)
+        else -> context.getString(R.string.settings_check_interval_value, rhythmPulseNotificationIntervalHours)
+    }
 
     CollapsibleHeaderScreen(
         title = context.getString(R.string.settings_notifications),
@@ -543,14 +562,55 @@ fun NotificationsSettingsScreen(onBackClick: () -> Unit) {
     ) { modifier ->
         val settingGroups = listOf(
             SettingGroup(
-                title = context.getString(R.string.settings_notification_style),
+                title = context.getString(R.string.settings_notifications_updates_group),
                 items = listOf(
                     SettingItem(
-                        Icons.Default.Notifications,
-                        context.getString(R.string.settings_custom_notifications),
-                        context.getString(R.string.settings_custom_notifications_desc),
-                        toggleState = useCustomNotification,
-                        onToggleChange = { appSettings.setUseCustomNotification(it) }
+                        Icons.Default.Update,
+                        context.getString(R.string.settings_update_notifications),
+                        context.getString(R.string.settings_update_notifications_merged_desc),
+                        toggleState = mergedUpdateNotificationsEnabled,
+                        onToggleChange = {
+                            appSettings.setUpdateNotificationsEnabled(it)
+                            appSettings.setUpdateStatusNotificationsEnabled(it)
+                        }
+                    )
+                )
+            ),
+            SettingGroup(
+                title = context.getString(R.string.settings_notifications_rhythm_guard_group),
+                items = listOf(
+                    SettingItem(
+                        Icons.Default.Warning,
+                        context.getString(R.string.settings_rhythm_guard_alert_notifications),
+                        context.getString(R.string.settings_rhythm_guard_alert_notifications_desc),
+                        toggleState = rhythmGuardAlertNotificationsEnabled,
+                        onToggleChange = { appSettings.setRhythmGuardAlertNotificationsEnabled(it) }
+                    ),
+                    SettingItem(
+                        Icons.Default.Schedule,
+                        context.getString(R.string.settings_rhythm_guard_timer_notifications),
+                        context.getString(R.string.settings_rhythm_guard_timer_notifications_desc),
+                        toggleState = rhythmGuardTimerNotificationsEnabled,
+                        onToggleChange = { appSettings.setRhythmGuardTimerNotificationsEnabled(it) }
+                    )
+                )
+            ),
+            SettingGroup(
+                title = context.getString(R.string.settings_notifications_rhythm_pulse_group),
+                items = listOf(
+                    SettingItem(
+                        Icons.Default.Celebration,
+                        context.getString(R.string.settings_rhythm_pulse_notifications),
+                        context.getString(R.string.settings_rhythm_pulse_notifications_desc),
+                        toggleState = rhythmPulseNotificationsEnabled,
+                        onToggleChange = { appSettings.setRhythmPulseNotificationsEnabled(it) }
+                    ),
+                    SettingItem(
+                        Icons.Default.Schedule,
+                        context.getString(R.string.settings_rhythm_pulse_interval),
+                        pulseIntervalLabel,
+                        onClick = { showPulseIntervalDialog = true },
+                        enabled = rhythmPulseNotificationsEnabled
                     )
                 )
             )
@@ -578,51 +638,10 @@ fun NotificationsSettingsScreen(onBackClick: () -> Unit) {
                 Spacer(modifier = Modifier.height(24.dp))
 
                 val materialItems = group.items.map { item ->
-                    Material3SettingsItem(
-                        icon = item.icon,
-                        title = { Text(item.title) },
-                        description = item.description?.let { desc -> { Text(desc) } },
-                        trailingContent = if (item.toggleState != null) {
-                            {
-                                TunerAnimatedSwitch(
-                                    checked = item.toggleState,
-                                    onCheckedChange = {
-                                        HapticUtils.performHapticFeedback(context, hapticFeedback, HapticFeedbackType.TextHandleMove)
-                                        item.onToggleChange?.invoke(it)
-                                    }
-                                )
-                            }
-                        } else if (item.onClick != null) {
-                            {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                                    contentDescription = context.getString(R.string.cd_navigate),
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        } else {
-                            null
-                        },
-                        isHighlighted = item.toggleState == true,
-                        enabled = item.enabled,
-                        onClick = when {
-                            item.onClick != null -> {
-                                {
-                                    HapticUtils.performHapticFeedback(context, hapticFeedback, HapticFeedbackType.LongPress)
-                                    item.onClick.invoke()
-                                }
-                            }
-
-                            item.toggleState != null && item.onToggleChange != null -> {
-                                {
-                                    HapticUtils.performHapticFeedback(context, hapticFeedback, HapticFeedbackType.TextHandleMove)
-                                    item.onToggleChange.invoke(!item.toggleState)
-                                }
-                            }
-
-                            else -> null
-                        }
+                    toMaterial3SettingsItem(
+                        context = context,
+                        item = item,
+                        hapticFeedback = hapticFeedback
                     )
                 }
 
@@ -633,6 +652,76 @@ fun NotificationsSettingsScreen(onBackClick: () -> Unit) {
                 )
             }
         }
+    }
+
+    if (showPulseIntervalDialog) {
+        AlertDialog(
+            onDismissRequest = { showPulseIntervalDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = { Text(context.getString(R.string.settings_rhythm_pulse_interval_dialog_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val intervals = listOf(
+                        6 to context.getString(R.string.settings_interval_every_6_hours),
+                        12 to context.getString(R.string.settings_interval_every_12_hours),
+                        24 to context.getString(R.string.settings_interval_once_a_day),
+                        48 to context.getString(R.string.settings_interval_every_48_hours),
+                        72 to context.getString(R.string.settings_interval_every_72_hours)
+                    )
+
+                    intervals.forEach { (hours, label) ->
+                        Card(
+                            onClick = {
+                                HapticUtils.performHapticFeedback(context, hapticFeedback, HapticFeedbackType.TextHandleMove)
+                                appSettings.setRhythmPulseNotificationIntervalHours(hours)
+                                showPulseIntervalDialog = false
+                            },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (rhythmPulseNotificationIntervalHours == hours)
+                                    MaterialTheme.colorScheme.primaryContainer
+                                else
+                                    MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = if (rhythmPulseNotificationIntervalHours == hours) FontWeight.SemiBold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (rhythmPulseNotificationIntervalHours == hours) {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = context.getString(R.string.ui_selected),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                OutlinedButton(onClick = { showPulseIntervalDialog = false }) {
+                    Text(context.getString(R.string.ui_close))
+                }
+            },
+            shape = RoundedCornerShape(24.dp)
+        )
     }
 }
 
@@ -4474,7 +4563,6 @@ fun UpdatesSettingsScreen(onBackClick: () -> Unit) {
     // Collect state from ViewModel and AppSettings
     val updatesEnabled by appSettings.updatesEnabled.collectAsState()
     val autoCheckForUpdates by appSettings.autoCheckForUpdates.collectAsState()
-    val updateNotificationsEnabled by appSettings.updateNotificationsEnabled.collectAsState()
     val useSmartUpdatePolling by appSettings.useSmartUpdatePolling.collectAsState()
     val updateChannel by appSettings.updateChannel.collectAsState()
     val updateCheckIntervalHours by appSettings.updateCheckIntervalHours.collectAsState()
@@ -4492,6 +4580,17 @@ fun UpdatesSettingsScreen(onBackClick: () -> Unit) {
     // Dialog states
     var showChannelDialog by remember { mutableStateOf(false) }
     var showIntervalDialog by remember { mutableStateOf(false) }
+
+    val intervalOptions = listOf(
+        1 to context.getString(R.string.settings_interval_every_hour),
+        6 to context.getString(R.string.settings_interval_every_6_hours),
+        12 to context.getString(R.string.settings_interval_every_12_hours),
+        24 to context.getString(R.string.settings_interval_once_a_day),
+        168 to context.getString(R.string.settings_interval_once_a_week)
+    )
+    val updateIntervalLabel = intervalOptions.firstOrNull { (hours, _) ->
+        hours == updateCheckIntervalHours
+    }?.second ?: context.getString(R.string.settings_check_interval_value, updateCheckIntervalHours)
 
     // Determine status text for header
     val statusText = when {
@@ -5128,15 +5227,6 @@ fun UpdatesSettingsScreen(onBackClick: () -> Unit) {
                         )
                         add(
                             SettingItem(
-                                Icons.Default.Notifications,
-                                context.getString(R.string.onboarding_update_notifications_title),
-                                context.getString(R.string.onboarding_update_notifications_desc),
-                                toggleState = updateNotificationsEnabled,
-                                onToggleChange = { appSettings.setUpdateNotificationsEnabled(it) }
-                            )
-                        )
-                        add(
-                            SettingItem(
                                 Icons.Default.CloudSync,
                                 context.getString(R.string.onboarding_smart_polling_title),
                                 context.getString(R.string.onboarding_smart_polling_desc),
@@ -5156,7 +5246,7 @@ fun UpdatesSettingsScreen(onBackClick: () -> Unit) {
                             SettingItem(
                                 Icons.Default.Schedule,
                                 context.getString(R.string.updates_check_interval_title),
-                                context.getString(R.string.updates_check_frequency),
+                                updateIntervalLabel,
                                 onClick = { showIntervalDialog = true }
                             )
                         )
@@ -5325,15 +5415,7 @@ fun UpdatesSettingsScreen(onBackClick: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val intervals = listOf(
-                        1 to context.getString(R.string.updates_check_frequency),
-                        6 to "6h",
-                        12 to "12h",
-                        24 to "24h",
-                        168 to "168h"
-                    )
-
-                    intervals.forEach { (hours, label) ->
+                    intervalOptions.forEach { (hours, label) ->
                         Card(
                             onClick = {
                                 HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
@@ -5381,7 +5463,7 @@ fun UpdatesSettingsScreen(onBackClick: () -> Unit) {
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Close")
+                    Text(context.getString(R.string.ui_close))
                 }
             },
             shape = RoundedCornerShape(24.dp)
@@ -5399,8 +5481,6 @@ fun ExperimentalFeaturesScreen(onBackClick: () -> Unit) {
     val showLyricsRomanization by appSettings.showLyricsRomanization.collectAsState()
     val ignoreMediaStoreCovers by appSettings.ignoreMediaStoreCovers.collectAsState()
     val losslessArtwork by appSettings.losslessArtwork.collectAsState()
-    val appMode by appSettings.appMode.collectAsState()
-    val allowCellularStreaming by appSettings.allowCellularStreaming.collectAsState()
     val bitPerfectMode by appSettings.bitPerfectMode.collectAsState()
     val audioRoutingMode by appSettings.audioRoutingMode.collectAsState()
     val haptic = LocalHapticFeedback.current
@@ -5415,7 +5495,6 @@ fun ExperimentalFeaturesScreen(onBackClick: () -> Unit) {
     val updaterViewModel: AppUpdaterViewModel = viewModel()
     val latestVersion by updaterViewModel.latestVersion.collectAsState()
 
-    var showAppModeDialog by remember { mutableStateOf(false) }
     var showRestartDialog by remember { mutableStateOf(false) }
     var restartDialogMessage by remember { mutableStateOf("") }
 
@@ -5425,32 +5504,6 @@ fun ExperimentalFeaturesScreen(onBackClick: () -> Unit) {
         onBackClick = onBackClick
     ) { modifier ->
         val settingGroups = buildList {
-            // Music Source settings group
-            add(
-                SettingGroup(
-                    title = context.getString(R.string.exp_music_source),
-                    items = listOf(
-                        SettingItem(
-                            Icons.Default.Storage,
-                            context.getString(R.string.exp_music_mode),
-                            if (appMode == "LOCAL") context.getString(R.string.exp_local_files_desc) else context.getString(R.string.exp_streaming_desc),
-                            onClick = { showAppModeDialog = true }
-                        ),
-                        SettingItem(
-                            Icons.Default.Public,
-                            context.getString(R.string.exp_cellular_streaming),
-                            context.getString(R.string.exp_cellular_streaming_desc),
-                            toggleState = allowCellularStreaming,
-                            onToggleChange = { appSettings.setAllowCellularStreaming(it) }
-                        ).takeIf { appMode == "STREAMING" } ?: SettingItem(
-                            Icons.Default.Info,
-                            context.getString(R.string.exp_note),
-                            context.getString(R.string.exp_streaming_coming_soon)
-                        )
-                    )
-                )
-            )
-
             add(
                 SettingGroup(
                     title = context.getString(R.string.settings_audio_effects),
@@ -5731,200 +5784,6 @@ fun ExperimentalFeaturesScreen(onBackClick: () -> Unit) {
             }
 
             item { Spacer(modifier = Modifier.height(40.dp)) }
-        }
-    }
-    
-    if (showAppModeDialog) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        
-        ModalBottomSheet(
-            onDismissRequest = { showAppModeDialog = false },
-            sheetState = sheetState,
-            dragHandle = { 
-                BottomSheetDefaults.DragHandle(
-                    color = MaterialTheme.colorScheme.primary
-                )
-            },
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 24.dp)
-            ) {
-                // Header
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 0.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = context.getString(R.string.exp_music_mode),
-                            style = MaterialTheme.typography.displayMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 6.dp)
-                                .background(
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    shape = CircleShape
-                                )
-                        ) {
-                            Text(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                text = context.getString(R.string.exp_choose_music_source),
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-                
-                // Local mode option
-                Card(
-                    onClick = {
-                        HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                        appSettings.setAppMode("LOCAL")
-                        showAppModeDialog = false
-                    },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (appMode == "LOCAL") 
-                            MaterialTheme.colorScheme.primaryContainer 
-                        else 
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Storage,
-                            contentDescription = null,
-                            tint = if (appMode == "LOCAL")
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            else
-                                MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        
-                        Spacer(modifier = Modifier.width(16.dp))
-                        
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = context.getString(R.string.exp_local_files),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = if (appMode == "LOCAL") 
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                else 
-                                    MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = context.getString(R.string.exp_local_files_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (appMode == "LOCAL") 
-                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                                else 
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        
-                        if (appMode == "LOCAL") {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Selected",
-                                
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
-                
-                // Streaming mode option
-                Card(
-                    onClick = {
-                        HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                        appSettings.setAppMode("STREAMING")
-                        showAppModeDialog = false
-                    },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (appMode == "STREAMING") 
-                            MaterialTheme.colorScheme.primaryContainer 
-                        else 
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Public,
-                            contentDescription = null,
-                            tint = if (appMode == "STREAMING")
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            else
-                                MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        
-                        Spacer(modifier = Modifier.width(16.dp))
-                        
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = context.getString(R.string.exp_streaming_services),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = if (appMode == "STREAMING") 
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                else 
-                                    MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = context.getString(R.string.exp_streaming_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (appMode == "STREAMING") 
-                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                                else 
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        
-                        if (appMode == "STREAMING") {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Selected",
-                                
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-            }
         }
     }
 
@@ -6410,6 +6269,7 @@ fun LibrarySettingsScreen(onBackClick: () -> Unit) {
     val haptics = LocalHapticFeedback.current
 
     val enableRatingSystem by appSettings.enableRatingSystem.collectAsState()
+    val libraryCombineDiscs by appSettings.libraryCombineDiscs.collectAsState()
     val ignoreMediaStoreCovers by appSettings.ignoreMediaStoreCovers.collectAsState()
     val losslessArtwork by appSettings.losslessArtwork.collectAsState()
     val albumBottomSheetGradientBlur by appSettings.albumBottomSheetGradientBlur.collectAsState()
@@ -6437,6 +6297,13 @@ fun LibrarySettingsScreen(onBackClick: () -> Unit) {
                         context.getString(R.string.settings_library_tab_order),
                         context.getString(R.string.settings_library_tab_order_desc),
                         onClick = { showLibraryTabOrderBottomSheet = true }
+                    ),
+                    SettingItem(
+                        Icons.Default.Album,
+                        context.getString(R.string.settings_library_combine_discs),
+                        context.getString(R.string.settings_library_combine_discs_desc),
+                        toggleState = libraryCombineDiscs,
+                        onToggleChange = { appSettings.setLibraryCombineDiscs(it) }
                     )
                 )
             ),

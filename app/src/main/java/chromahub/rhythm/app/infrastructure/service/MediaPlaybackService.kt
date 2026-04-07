@@ -29,8 +29,6 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
-import androidx.media3.session.MediaNotification
-import androidx.media3.session.DefaultMediaNotificationProvider
 import chromahub.rhythm.app.activities.MainActivity
 import chromahub.rhythm.app.shared.data.model.AppSettings
 import chromahub.rhythm.app.shared.data.model.Song
@@ -50,6 +48,8 @@ import androidx.media3.common.AudioAttributes as ExoAudioAttributes
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import chromahub.rhythm.app.shared.data.model.Playlist
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @OptIn(UnstableApi::class)
 class MediaPlaybackService : MediaLibraryService(), Player.Listener {
@@ -93,6 +93,10 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     private var isInitializingAudioEffects: Boolean = false // Prevent concurrent initialization
     private var audioEffectsInitialized: Boolean = false // Track if effects have been successfully initialized
     private var isBassBoostAvailable: Boolean = true // Rhythm bass boost is always available
+    private val audioEffectsInitMutex = Mutex()
+    private var audioEffectsInitJob: Job? = null
+    @Volatile
+    private var pendingAudioEffectsSessionId: Int = 0
     
     // Player listener reference for proper cleanup
     private var playerListener: Player.Listener? = null
@@ -150,14 +154,13 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     // Status broadcaster for Tasker, KWGT, and other automation apps
     private lateinit var statusBroadcaster: chromahub.rhythm.app.utils.StatusBroadcaster
     
-    // Custom notification provider for app-specific notifications
-    private var customNotificationProvider: DefaultMediaNotificationProvider? = null
-    
     // SharedPreferences keys
     companion object {
         private const val TAG = "MediaPlaybackService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "RhythmMediaPlayback"
+        private const val SLEEP_TIMER_NOTIFICATION_ID = 1002
+        private const val SLEEP_TIMER_CHANNEL_ID = "RhythmSleepTimer"
 
         private const val PREF_NAME = "rhythm_preferences"
         private const val PREF_HIGH_QUALITY_AUDIO = "high_quality_audio"
@@ -231,10 +234,16 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         createNotificationChannel()
 
         // Start foreground immediately to avoid ANR
-        startForegroundWithNotification("Rhythm Music", "Starting service...")
+        startForegroundWithNotification(
+            getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+            getString(chromahub.rhythm.app.R.string.service_starting)
+        )
 
         // Initialize settings manager (fast operation)
-        updateForegroundNotification("Rhythm Music", "Loading settings...")
+        updateForegroundNotification(
+            getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+            getString(chromahub.rhythm.app.R.string.service_loading_settings)
+        )
         appSettings = AppSettings.getInstance(applicationContext)
         
         // Initialize Rhythm audio processors early (before player creation)
@@ -262,7 +271,10 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         statusBroadcaster = chromahub.rhythm.app.utils.StatusBroadcaster(applicationContext)
 
         // Register BroadcastReceiver for favorite changes
-        updateForegroundNotification("Rhythm Music", "Setting up components...")
+        updateForegroundNotification(
+            getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+            getString(chromahub.rhythm.app.R.string.service_setup_components)
+        )
         val filter = IntentFilter("chromahub.rhythm.app.action.FAVORITE_CHANGED")
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(favoriteChangeReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -272,28 +284,44 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
 
         try {
             // Initialize core components on main thread (required for media service)
-            updateForegroundNotification("Rhythm Music", "Initializing player...")
+            updateForegroundNotification(
+                getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+                getString(chromahub.rhythm.app.R.string.service_initializing_player)
+            )
             initializePlayer()
 
-            updateForegroundNotification("Rhythm Music", "Creating playback controls...")
+            updateForegroundNotification(
+                getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+                getString(chromahub.rhythm.app.R.string.service_creating_controls)
+            )
             createCustomCommands()
 
             // Create the media session (required synchronously)
-            updateForegroundNotification("Rhythm Music", "Setting up media session...")
+            updateForegroundNotification(
+                getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+                getString(chromahub.rhythm.app.R.string.service_setup_media_session)
+            )
             mediaSession = createMediaSession()
 
             // Initialize controller asynchronously to avoid blocking
-            updateForegroundNotification("Rhythm Music", "Initializing media controller...")
+            updateForegroundNotification(
+                getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+                getString(chromahub.rhythm.app.R.string.service_initializing_controller)
+            )
             createController()
 
-            // Observe notification preference changes
-            updateForegroundNotification("Rhythm Music", "Service ready")
-            observeNotificationSettings()
+            updateForegroundNotification(
+                getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+                getString(chromahub.rhythm.app.R.string.service_ready)
+            )
 
             Log.d(TAG, "Service initialized successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing service", e)
-            updateForegroundNotification("Rhythm Music", "Initialization failed")
+            updateForegroundNotification(
+                getString(chromahub.rhythm.app.R.string.service_rhythm_music),
+                getString(chromahub.rhythm.app.R.string.service_init_failed)
+            )
         }
     }
     
@@ -301,19 +329,30 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Rhythm Media Playback",
+                getString(chromahub.rhythm.app.R.string.media3_notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Media playback controls"
+                description = getString(chromahub.rhythm.app.R.string.media3_notification_channel_description)
                 setShowBadge(false)
+            }
+
+            val sleepTimerChannel = NotificationChannel(
+                SLEEP_TIMER_CHANNEL_ID,
+                getString(chromahub.rhythm.app.R.string.notification_sleep_timer_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(chromahub.rhythm.app.R.string.notification_sleep_timer_channel_desc)
+                setShowBadge(false)
+                enableVibration(false)
             }
             
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
+            notificationManager.createNotificationChannel(sleepTimerChannel)
         }
     }
     
-    private fun startForegroundWithNotification(title: String = "Rhythm Music", content: String = "Initializing music service...") {
+    private fun startForegroundWithNotification(title: String = "Rhythm Music", content: String = "Rhythm is starting.") {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
@@ -339,34 +378,6 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
 
         notificationManager.notify(NOTIFICATION_ID, notification)
         Log.d(TAG, "Updated foreground notification: $title - $content")
-    }
-    
-    private fun observeNotificationSettings() {
-        serviceScope.launch {
-            appSettings.useCustomNotification.collect { useCustomNotification ->
-                Log.d(TAG, "Notification preference changed: $useCustomNotification")
-                updateNotificationProvider(useCustomNotification)
-            }
-        }
-    }
-    
-    private fun updateNotificationProvider(useCustomNotification: Boolean) {
-        try {
-            if (useCustomNotification && customNotificationProvider == null) {
-                // Switch to custom notification provider
-                customNotificationProvider = DefaultMediaNotificationProvider.Builder(this)
-                    .setChannelId(CHANNEL_ID)
-                    .setNotificationId(NOTIFICATION_ID)
-                    .build()
-                Log.d(TAG, "Switched to custom notification provider")
-            } else if (!useCustomNotification && customNotificationProvider != null) {
-                // Switch back to system media notifications
-                customNotificationProvider = null
-                Log.d(TAG, "Switched to system media notifications")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error updating notification provider", e)
-        }
     }
     
     private fun initializePlayer() {
@@ -692,25 +703,12 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val sessionBuilder = MediaLibrarySession.Builder(
+        return MediaLibrarySession.Builder(
             this,
             player,
             MediaSessionCallback()
         ).setSessionActivity(pendingIntent)
-        
-        // Configure notification provider based on user setting
-        if (appSettings.useCustomNotification.value) {
-            // Use custom notification provider for app-specific styling
-            customNotificationProvider = DefaultMediaNotificationProvider.Builder(this)
-                .setChannelId(CHANNEL_ID)
-                .setNotificationId(NOTIFICATION_ID)
-                .build()
-            // Note: MediaLibrarySession doesn't directly support setMediaNotificationProvider
-            // The custom notification provider will be handled through MediaNotificationManager
-        }
-        // If custom notifications are disabled, Media3 uses system media notifications
-        
-        return sessionBuilder.build()
+            .build()
     }
     
     private fun isCurrentSongFavorite(): Boolean {
@@ -1260,6 +1258,8 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         // Cancel all coroutines and pending jobs
         updateLayoutJob?.cancel()
         sleepTimerJob?.cancel()
+        audioEffectsInitJob?.cancel()
+        cancelSleepTimerProgressNotification()
         serviceScope.cancel()
         
         // Release crossfade engine and transition controller
@@ -1706,12 +1706,12 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     }
     
     fun getRemainingTimeMs(): Long {
-        return if (sleepTimerJob?.isActive == true && sleepTimerDurationMs > 0 && sleepTimerStartTime > 0) {
-            val elapsed = System.currentTimeMillis() - sleepTimerStartTime
-            maxOf(0, sleepTimerDurationMs - elapsed)
-        } else {
-            0L
+        if (sleepTimerDurationMs <= 0L || sleepTimerStartTime <= 0L) {
+            return 0L
         }
+
+        val elapsed = System.currentTimeMillis() - sleepTimerStartTime
+        return maxOf(0L, sleepTimerDurationMs - elapsed)
     }
     
     private fun resetSleepTimer() {
@@ -1722,11 +1722,90 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     }
     
     private fun broadcastSleepTimerStatus() {
+        val timerActive = isSleepTimerActive()
+        val remainingTimeMs = getRemainingTimeMs()
+
         val intent = Intent(BROADCAST_SLEEP_TIMER_STATUS).apply {
-            putExtra(EXTRA_TIMER_ACTIVE, isSleepTimerActive())
-            putExtra(EXTRA_REMAINING_TIME, getRemainingTimeMs())
+            putExtra(EXTRA_TIMER_ACTIVE, timerActive)
+            putExtra(EXTRA_REMAINING_TIME, remainingTimeMs)
         }
         sendBroadcast(intent)
+
+        if (timerActive && sleepTimerDurationMs > 0L) {
+            updateSleepTimerProgressNotification(
+                remainingMs = remainingTimeMs,
+                totalMs = sleepTimerDurationMs,
+                pauseOnly = pauseOnlyEnabled
+            )
+        } else {
+            cancelSleepTimerProgressNotification()
+        }
+    }
+
+    private fun updateSleepTimerProgressNotification(
+        remainingMs: Long,
+        totalMs: Long,
+        pauseOnly: Boolean
+    ) {
+        val safeTotalSeconds = (totalMs / 1000L).coerceAtLeast(1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val remainingSeconds = (remainingMs / 1000L).coerceIn(0L, safeTotalSeconds.toLong()).toInt()
+        val completedSeconds = (safeTotalSeconds - remainingSeconds).coerceIn(0, safeTotalSeconds)
+
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(MainActivity.EXTRA_OPEN_PLAYER, true)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            2001,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = getString(chromahub.rhythm.app.R.string.notification_sleep_timer_title)
+        val timeText = formatSleepTimerDuration(remainingMs)
+        val content = if (pauseOnly) {
+            getString(chromahub.rhythm.app.R.string.notification_sleep_timer_pause_in, timeText)
+        } else {
+            getString(chromahub.rhythm.app.R.string.notification_sleep_timer_stop_in, timeText)
+        }
+
+        val notification = NotificationCompat.Builder(this, SLEEP_TIMER_CHANNEL_ID)
+            .setSmallIcon(chromahub.rhythm.app.R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setProgress(safeTotalSeconds, completedSeconds, false)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(SLEEP_TIMER_NOTIFICATION_ID, notification)
+    }
+
+    private fun cancelSleepTimerProgressNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(SLEEP_TIMER_NOTIFICATION_ID)
+    }
+
+    private fun formatSleepTimerDuration(milliseconds: Long): String {
+        val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+
+        return if (hours > 0L) {
+            String.format("%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format("%02d:%02d", minutes, seconds)
+        }
     }
     
     // Audio Effects (Equalizer) functionality
@@ -1740,41 +1819,62 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     }
     
     fun initializeAudioEffects() {
-        // Prevent concurrent initialization
-        if (isInitializingAudioEffects) {
-            Log.w(TAG, "Audio effects initialization already in progress, skipping")
+        val requestedSessionId = try {
+            player.audioSessionId
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading audio session ID", e)
+            0
+        }
+
+        if (requestedSessionId == 0) {
+            Log.w(TAG, "Invalid audio session ID (0), skipping effects initialization")
             return
         }
-        
+
+        pendingAudioEffectsSessionId = requestedSessionId
+
+        if (audioEffectsInitJob?.isActive == true) {
+            Log.d(TAG, "Audio effects initialization already in progress; queued latest session: $requestedSessionId")
+            return
+        }
+
+        audioEffectsInitJob = serviceScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                val audioSessionId = pendingAudioEffectsSessionId
+                pendingAudioEffectsSessionId = 0
+                if (audioSessionId == 0) {
+                    break
+                }
+
+                audioEffectsInitMutex.withLock {
+                    initializeAudioEffectsInternal(audioSessionId)
+                }
+            }
+        }
+    }
+
+    private suspend fun initializeAudioEffectsInternal(audioSessionId: Int) {
         try {
             isInitializingAudioEffects = true
-            val audioSessionId = player.audioSessionId
             Log.d(TAG, "Initializing audio effects with session ID: $audioSessionId (previously initialized: $audioEffectsInitialized)")
-            
-            // Skip initialization if session ID is invalid
-            if (audioSessionId == 0) {
-                Log.w(TAG, "Invalid audio session ID (0), skipping effects initialization")
-                isInitializingAudioEffects = false
-                return
-            }
-            
+
             // CRITICAL: Release ALL existing effects BEFORE creating new ones to prevent AudioFlinger error -38
             try {
                 equalizer?.release()
                 equalizer = null
-                
+
                 // Reset Rhythm processors
                 rhythmBassBoostProcessor?.reset()
                 rhythmSpatializationProcessor?.reset()
-                
+
                 Log.d(TAG, "Released existing audio effects before reinitialization")
-                
-                // Small delay to allow Android AudioFlinger to fully release resources
-                Thread.sleep(50)
+
+                // Small non-blocking delay to allow Android AudioFlinger to fully release resources.
+                delay(50)
             } catch (e: Exception) {
                 Log.w(TAG, "Error releasing existing effects: ${e.message}")
             }
-            
+
             // Initialize equalizer directly (no dummy checks - they waste effect slots)
             try {
                 equalizer = android.media.audiofx.Equalizer(0, audioSessionId).apply {
@@ -1785,11 +1885,11 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                 Log.w(TAG, "Equalizer is not available on this device: ${e.message}")
                 equalizer = null
             }
-            
+
             // Initialize Rhythm audio processors (replaces Android BassBoost and Spatializer)
             // Processors are already created in onCreate(), just load their settings here
             Log.d(TAG, "Loading Rhythm processor settings")
-            
+
             // Ensure processors are available (they should be created in onCreate)
             if (rhythmBassBoostProcessor == null) {
                 Log.w(TAG, "Rhythm bass boost processor is null, creating new instance")
@@ -1803,7 +1903,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                     appSettings.setBassBoostAvailable(false)
                 }
             }
-            
+
             if (rhythmSpatializationProcessor == null) {
                 Log.w(TAG, "Rhythm spatialization processor is null, creating new instance")
                 try {
@@ -1812,14 +1912,14 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                     Log.e(TAG, "Failed to create spatialization processor", e)
                 }
             }
-            
+
             // Load saved settings and apply them
             loadSavedAudioEffects()
-            
+
             // Mark as successfully initialized
             audioEffectsInitialized = true
             Log.d(TAG, "Audio effects initialization completed successfully")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing audio effects", e)
             audioEffectsInitialized = false
@@ -2146,7 +2246,8 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     
     fun getSleepTimerRemainingTime(): Long = sleepTimerDurationMs - (System.currentTimeMillis() - sleepTimerStartTime)
     
-    fun isSleepTimerActive(): Boolean = sleepTimerJob?.isActive == true
+    fun isSleepTimerActive(): Boolean =
+        sleepTimerDurationMs > 0L && sleepTimerStartTime > 0L && getRemainingTimeMs() > 0L
     
     private fun releaseAudioEffects() {
         try {

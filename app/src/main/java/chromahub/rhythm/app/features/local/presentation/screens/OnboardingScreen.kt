@@ -8330,11 +8330,7 @@ fun EnhancedNotificationsContent(
     nextButton: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val haptic = LocalHapticFeedback.current
     val scrollState = rememberScrollState()
-
-    // Notification settings
-    val useCustomNotification by appSettings.useCustomNotification.collectAsState()
 
     if (isTablet) {
         // Tablet layout
@@ -8404,10 +8400,7 @@ fun EnhancedNotificationsContent(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                NotificationSettingsCard(
-                    useCustomNotification = useCustomNotification,
-                    onCustomNotificationChange = { appSettings.setUseCustomNotification(it) }
-                )
+                NotificationInfoCard()
             }
         }
     } else {
@@ -8452,51 +8445,11 @@ fun EnhancedNotificationsContent(
                 modifier = Modifier.padding(bottom = 24.dp)
             )
 
-            NotificationSettingsCard(
-                useCustomNotification = useCustomNotification,
-                onCustomNotificationChange = { appSettings.setUseCustomNotification(it) }
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
             NotificationInfoCard()
 
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
-}
-
-@Composable
-private fun NotificationSettingsCard(
-    useCustomNotification: Boolean,
-    onCustomNotificationChange: (Boolean) -> Unit
-) {
-    val context = LocalContext.current
-    val haptic = LocalHapticFeedback.current
-
-    Material3SettingsGroup(
-        items = listOf(
-            Material3SettingsItem(
-                icon = Icons.Filled.Style,
-                title = { Text(context.getString(R.string.onboarding_custom_notifications)) },
-                description = { Text(context.getString(R.string.onboarding_custom_notifications_desc)) },
-                trailingContent = {
-                    OnboardingAnimatedSwitch(
-                        checked = useCustomNotification,
-                        onCheckedChange = {
-                            HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                            onCustomNotificationChange(it)
-                        }
-                    )
-                },
-                onClick = {
-                    HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.TextHandleMove)
-                    onCustomNotificationChange(!useCustomNotification)
-                }
-            )
-        ),
-        containerColor = MaterialTheme.colorScheme.surfaceContainer
-    )
 }
 
 @Composable

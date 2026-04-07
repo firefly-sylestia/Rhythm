@@ -410,6 +410,16 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             parentScreen = context.getString(R.string.settings_library_settings),
             settingKey = "libraryTabOrder"
         ))
+        add(SearchableSettingItem(
+            id = "library_combine_discs",
+            title = context.getString(R.string.settings_library_combine_discs),
+            description = context.getString(R.string.settings_library_combine_discs_desc),
+            keywords = listOf("disc", "multi-disc", "combine", "album", "sorting", "track list"),
+            icon = Icons.Default.Album,
+            route = SettingsRoutes.LIBRARY_SETTINGS,
+            parentScreen = context.getString(R.string.settings_library_settings),
+            settingKey = "libraryCombineDiscs"
+        ))
         
         // Notifications & Services Section
         add(SearchableSettingItem(
@@ -589,6 +599,16 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             route = SettingsRoutes.UPDATES,
             parentScreen = context.getString(R.string.settings_section_updates_info),
             settingKey = "updatesEnabled"
+        ))
+        add(SearchableSettingItem(
+            id = "updates_interval",
+            title = context.getString(R.string.updates_check_interval_title),
+            description = context.getString(R.string.onboarding_check_interval_desc),
+            keywords = listOf("update interval", "check frequency", "hourly", "daily", "weekly", "polling schedule"),
+            icon = Icons.Default.Schedule,
+            route = SettingsRoutes.UPDATES,
+            parentScreen = context.getString(R.string.settings_updates_title),
+            settingKey = "updateCheckIntervalHours"
         ))
         add(SearchableSettingItem(
             id = "about",
@@ -1216,15 +1236,6 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
         ))
         
         add(SearchableSettingItem(
-            id = "exp_music_mode",
-            title = context.getString(R.string.settings_exp_music_mode),
-            description = context.getString(R.string.settings_exp_music_mode_desc),
-            keywords = listOf("music mode", "local", "streaming", "source", "files"),
-            icon = Icons.Default.Storage,
-            route = SettingsRoutes.EXPERIMENTAL_FEATURES,
-            parentScreen = "Experimental"
-        ))
-        add(SearchableSettingItem(
             id = "exp_festive_theme",
             title = context.getString(R.string.settings_exp_festive_theme),
             description = context.getString(R.string.settings_exp_festive_theme_desc),
@@ -1274,7 +1285,7 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             id = "exp_launch_onboarding",
             title = context.getString(R.string.settings_exp_launch_onboarding),
             description = context.getString(R.string.settings_exp_launch_onboarding_desc),
-            keywords = listOf("onboarding", "reset", "restart", "welcome", "setup", "intro"),
+            keywords = listOf("rhythm tour", "tour", "reset", "restart", "welcome", "setup", "intro", "onboarding"),
             icon = Icons.Default.RestartAlt,
             route = SettingsRoutes.EXPERIMENTAL_FEATURES,
             parentScreen = "Experimental"
@@ -1317,16 +1328,6 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             route = SettingsRoutes.EXPERIMENTAL_FEATURES,
             parentScreen = "Experimental",
             settingKey = "broadcastStatusEnabled"
-        ))
-        add(SearchableSettingItem(
-            id = "exp_cellular_streaming",
-            title = context.getString(R.string.settings_exp_cellular_streaming),
-            description = context.getString(R.string.settings_exp_cellular_streaming_desc),
-            keywords = listOf("cellular", "mobile data", "streaming", "data", "network"),
-            icon = Icons.Default.Public,
-            route = SettingsRoutes.EXPERIMENTAL_FEATURES,
-            parentScreen = "Experimental",
-            settingKey = "allowCellularStreaming"
         ))
         add(SearchableSettingItem(
             id = "home_section_order",
@@ -1376,13 +1377,54 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
         
         // ======================== NOTIFICATIONS SCREEN ========================
         add(SearchableSettingItem(
-            id = "notifications_custom",
-            title = context.getString(R.string.settings_notifications_custom),
-            description = context.getString(R.string.settings_notifications_custom_desc),
-            keywords = listOf("notification", "custom", "media controls", "now playing notification"),
-            icon = Icons.Default.Notifications,
+            id = "notifications_updates",
+            title = context.getString(R.string.settings_update_notifications),
+            description = context.getString(R.string.settings_update_notifications_merged_desc),
+            keywords = listOf("updates", "update notifications", "new version", "release", "update available", "up to date", "update error", "check result"),
+            icon = Icons.Default.Update,
             route = SettingsRoutes.NOTIFICATIONS,
-            parentScreen = "Notifications"
+            parentScreen = "Notifications",
+            settingKey = "updateNotificationsEnabled"
+        ))
+        add(SearchableSettingItem(
+            id = "notifications_rhythm_guard_alerts",
+            title = context.getString(R.string.settings_notifications_rhythm_guard_alerts),
+            description = context.getString(R.string.settings_notifications_rhythm_guard_alerts_desc),
+            keywords = listOf("rhythm guard", "safety alert", "hearing warning", "volume risk", "exposure alert"),
+            icon = Icons.Default.Warning,
+            route = SettingsRoutes.NOTIFICATIONS,
+            parentScreen = "Notifications",
+            settingKey = "rhythmGuardAlertNotificationsEnabled"
+        ))
+        add(SearchableSettingItem(
+            id = "notifications_rhythm_guard_timers",
+            title = context.getString(R.string.settings_notifications_rhythm_guard_timers),
+            description = context.getString(R.string.settings_notifications_rhythm_guard_timers_desc),
+            keywords = listOf("rhythm guard timer", "break timer", "timeout", "resume countdown", "listening break"),
+            icon = Icons.Default.Timer,
+            route = SettingsRoutes.NOTIFICATIONS,
+            parentScreen = "Notifications",
+            settingKey = "rhythmGuardTimerNotificationsEnabled"
+        ))
+        add(SearchableSettingItem(
+            id = "notifications_rhythm_pulse",
+            title = context.getString(R.string.settings_notifications_rhythm_pulse),
+            description = context.getString(R.string.settings_notifications_rhythm_pulse_desc),
+            keywords = listOf("rhythm pulse", "greetings", "comic tips", "music tips", "motivational notifications"),
+            icon = Icons.Default.Celebration,
+            route = SettingsRoutes.NOTIFICATIONS,
+            parentScreen = "Notifications",
+            settingKey = "rhythmPulseNotificationsEnabled"
+        ))
+        add(SearchableSettingItem(
+            id = "notifications_rhythm_pulse_interval",
+            title = context.getString(R.string.settings_notifications_rhythm_pulse_interval),
+            description = context.getString(R.string.settings_notifications_rhythm_pulse_interval_desc),
+            keywords = listOf("pulse interval", "rhythm pulse frequency", "hours", "6 hours", "24 hours", "72 hours"),
+            icon = Icons.Default.Schedule,
+            route = SettingsRoutes.NOTIFICATIONS,
+            parentScreen = "Notifications",
+            settingKey = "rhythmPulseNotificationIntervalHours"
         ))
         
         // ======================== EXPRESSIVE SHAPES SCREEN ========================

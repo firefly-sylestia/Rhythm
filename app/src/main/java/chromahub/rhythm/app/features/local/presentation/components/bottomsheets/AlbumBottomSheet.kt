@@ -38,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -105,8 +106,10 @@ fun AlbumBottomSheet(
     // App settings for persistence
     val appSettings = remember { AppSettings.getInstance(context) }
     val savedSortOrder by appSettings.albumSortOrder.collectAsState()
+    val savedDiscFilter by appSettings.albumBottomSheetDiscFilter.collectAsState()
     val useHoursFormat by appSettings.useHoursInTimeFormat.collectAsState()
     val albumBottomSheetGradientBlur by appSettings.albumBottomSheetGradientBlur.collectAsState()
+    val libraryCombineDiscs by appSettings.libraryCombineDiscs.collectAsState()
     val albumArtworkShape = rememberExpressiveShapeFor(
         target = ExpressiveShapeTarget.ALBUM_ART,
         fallbackShape = RoundedCornerShape(24.dp)
@@ -147,6 +150,7 @@ fun AlbumBottomSheet(
         )
     }
     var showSortMenu by remember { mutableStateOf(false) }
+    var showDiscMenu by remember { mutableStateOf(false) }
 
     // Save sort order when changed
     LaunchedEffect(sortOrder) {
@@ -198,30 +202,86 @@ fun AlbumBottomSheet(
     )
 
     // Sort songs
-    val sortedSongs = remember(album.songs, sortOrder) {
-        when (sortOrder) {
-            AlbumSortOrder.TRACK_NUMBER -> album.songs.sortedWith { a, b ->
-                if (a.discNumber != b.discNumber) {
-                    a.discNumber.compareTo(b.discNumber)
-                } else {
-                    when {
-                        a.trackNumber > 0 && b.trackNumber > 0 -> a.trackNumber.compareTo(b.trackNumber)
-                        a.trackNumber > 0 -> -1
-                        b.trackNumber > 0 -> 1
-                        else -> a.title.compareTo(b.title, ignoreCase = true)
-                    }
-                }
+    val sortedSongs = remember(album.songs, sortOrder, libraryCombineDiscs) {
+        val trackComparator = Comparator<Song> { a, b ->
+            when {
+                a.trackNumber > 0 && b.trackNumber > 0 -> a.trackNumber.compareTo(b.trackNumber)
+                a.trackNumber > 0 -> -1
+                b.trackNumber > 0 -> 1
+                else -> a.title.compareTo(b.title, ignoreCase = true)
             }
-            AlbumSortOrder.TITLE_ASC -> album.songs.sortedBy { it.title.lowercase() }
-            AlbumSortOrder.TITLE_DESC -> album.songs.sortedByDescending { it.title.lowercase() }
-            AlbumSortOrder.DURATION_ASC -> album.songs.sortedBy { it.duration }
-            AlbumSortOrder.DURATION_DESC -> album.songs.sortedByDescending { it.duration }
+        }
+
+        fun sortByOrder(songs: List<Song>): List<Song> {
+            return when (sortOrder) {
+                AlbumSortOrder.TRACK_NUMBER -> songs.sortedWith(trackComparator)
+                AlbumSortOrder.TITLE_ASC -> songs.sortedBy { it.title.lowercase() }
+                AlbumSortOrder.TITLE_DESC -> songs.sortedByDescending { it.title.lowercase() }
+                AlbumSortOrder.DURATION_ASC -> songs.sortedBy { it.duration }
+                AlbumSortOrder.DURATION_DESC -> songs.sortedByDescending { it.duration }
+            }
+        }
+
+        if (libraryCombineDiscs) {
+            sortByOrder(album.songs)
+        } else {
+            album.songs
+                .groupBy { it.discNumber.coerceAtLeast(1) }
+                .toSortedMap()
+                .values
+                .flatMap { discSongs -> sortByOrder(discSongs) }
+        }
+    }
+
+    val hasMultipleDiscs = remember(sortedSongs, libraryCombineDiscs) {
+        !libraryCombineDiscs &&
+            sortedSongs.map { it.discNumber.coerceAtLeast(1) }.distinct().size > 1
+    }
+
+    val availableDiscs = remember(album.songs) {
+        album.songs
+            .map { it.discNumber.coerceAtLeast(1) }
+            .distinct()
+            .sorted()
+    }
+
+    val shouldShowDiscFilter = !libraryCombineDiscs && availableDiscs.size > 1
+    val selectedDiscFilterForAlbum = remember(savedDiscFilter, shouldShowDiscFilter, availableDiscs) {
+        if (shouldShowDiscFilter && savedDiscFilter in availableDiscs) {
+            savedDiscFilter
+        } else {
+            0
+        }
+    }
+
+    val visibleSongs = remember(sortedSongs, selectedDiscFilterForAlbum) {
+        if (selectedDiscFilterForAlbum == 0) {
+            sortedSongs
+        } else {
+            sortedSongs.filter { it.discNumber.coerceAtLeast(1) == selectedDiscFilterForAlbum }
+        }
+    }
+
+    val showDiscSections = hasMultipleDiscs && selectedDiscFilterForAlbum == 0
+    val selectedDiscLabel = if (selectedDiscFilterForAlbum == 0) {
+        context.getString(R.string.bottomsheet_all_discs)
+    } else {
+        context.getString(R.string.bottomsheet_disc_option, selectedDiscFilterForAlbum)
+    }
+
+    LaunchedEffect(shouldShowDiscFilter) {
+        if (!shouldShowDiscFilter) {
+            showDiscMenu = false
         }
     }
 
     // Calculate total duration
     val totalDuration = remember(sortedSongs) {
         sortedSongs.sumOf { it.duration }
+    }
+
+    val tracksDuration = remember(visibleSongs) {
+        visibleSongs.sumOf { it.duration }
     }
 
     // Lazy list state for scroll-based effects
@@ -518,11 +578,7 @@ fun AlbumBottomSheet(
                                                 HapticFeedbackType.LongPress
                                             )
                                             playAllPressed = true
-                                            if (sortedSongs.isNotEmpty()) {
-                                                onPlayAll(sortedSongs)
-                                            } else {
-                                                onPlayAll(album.songs)
-                                            }
+                                            onPlayAll(visibleSongs)
                                             onDismiss()
                                             onPlayerClick()
                                         },
@@ -562,11 +618,7 @@ fun AlbumBottomSheet(
                                                 HapticFeedbackType.LongPress
                                             )
                                             shufflePressed = true
-                                            if (sortedSongs.isNotEmpty()) {
-                                                onShufflePlay(sortedSongs)
-                                            } else {
-                                                onShufflePlay(album.songs)
-                                            }
+                                            onShufflePlay(visibleSongs)
                                             onDismiss()
                                             onPlayerClick()
                                         },
@@ -632,13 +684,61 @@ fun AlbumBottomSheet(
 
                                         // Sort and Close buttons
                                         Row(
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            if (shouldShowDiscFilter) {
+                                                Box {
+                                                    FilledTonalButton(
+                                                        onClick = {
+                                                            showSortMenu = false
+                                                            showDiscMenu = true
+                                                        },
+                                                        shape = RoundedCornerShape(14.dp),
+                                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                                        ),
+                                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                                        modifier = Modifier.height(40.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = selectedDiscLabel,
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Icon(
+                                                            imageVector = Icons.Filled.ArrowDropDown,
+                                                            contentDescription = context.getString(R.string.bottomsheet_disc_filter)
+                                                        )
+                                                    }
+
+                                                    DiscFilterDropdownMenu(
+                                                        expanded = showDiscMenu,
+                                                        onDismissRequest = { showDiscMenu = false },
+                                                        selectedDisc = selectedDiscFilterForAlbum,
+                                                        availableDiscs = availableDiscs,
+                                                        onSelectDisc = { discNumber ->
+                                                            HapticUtils.performHapticFeedback(
+                                                                context,
+                                                                haptics,
+                                                                HapticFeedbackType.LongPress
+                                                            )
+                                                            appSettings.setAlbumBottomSheetDiscFilter(discNumber)
+                                                            showDiscMenu = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+
                                             // Sort button
                                             Box {
                                                 FilledTonalIconButton(
-                                                    onClick = { showSortMenu = true },
+                                                    onClick = {
+                                                        showDiscMenu = false
+                                                        showSortMenu = true
+                                                    },
                                                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                                                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer
@@ -772,7 +872,7 @@ fun AlbumBottomSheet(
                                             .padding(horizontal = 12.dp)
                                             .graphicsLayer { translationY = contentOffset }
                                     ) {
-                                        if (sortedSongs.isNotEmpty()) {
+                                        if (visibleSongs.isNotEmpty()) {
                                             LazyColumn(
                                                 state = listState,
                                                 modifier = Modifier.fillMaxSize(),
@@ -783,10 +883,23 @@ fun AlbumBottomSheet(
                                                 userScrollEnabled = true
                                             ) {
                                                 itemsIndexed(
-                                                    items = sortedSongs,
+                                                    items = visibleSongs,
                                                     key = { index, song -> "album_song_${song.id}_$index" }
                                                 ) { index, song ->
-                                                        var itemVisible by remember(song.id, index) { mutableStateOf(false) }
+                                                    val currentDisc = song.discNumber.coerceAtLeast(1)
+                                                    val previousDisc = visibleSongs.getOrNull(index - 1)?.discNumber?.coerceAtLeast(1)
+                                                    val nextDisc = visibleSongs.getOrNull(index + 1)?.discNumber?.coerceAtLeast(1)
+                                                    val isFirstInDiscGroup = showDiscSections && previousDisc != currentDisc
+                                                    val isLastInDiscGroup = showDiscSections && nextDisc != currentDisc
+
+                                                    if (isFirstInDiscGroup) {
+                                                        DiscSectionHeader(
+                                                            discNumber = currentDisc,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                                                        )
+                                                    }
+
+                                                    var itemVisible by remember(song.id, index) { mutableStateOf(false) }
 
                                                     val itemAlpha by animateFloatAsState(
                                                         targetValue = if (itemVisible) 1f else 0f,
@@ -833,14 +946,27 @@ fun AlbumBottomSheet(
                                                             song = song,
                                                             index = index + 1,
                                                             itemShape = when {
-                                                                sortedSongs.size == 1 -> RoundedCornerShape(24.dp)
+                                                                showDiscSections && isFirstInDiscGroup && isLastInDiscGroup -> RoundedCornerShape(24.dp)
+                                                                showDiscSections && isFirstInDiscGroup -> RoundedCornerShape(
+                                                                    topStart = 24.dp,
+                                                                    topEnd = 24.dp,
+                                                                    bottomStart = 6.dp,
+                                                                    bottomEnd = 6.dp
+                                                                )
+                                                                showDiscSections && isLastInDiscGroup -> RoundedCornerShape(
+                                                                    topStart = 6.dp,
+                                                                    topEnd = 6.dp,
+                                                                    bottomStart = 24.dp,
+                                                                    bottomEnd = 24.dp
+                                                                )
+                                                                visibleSongs.size == 1 -> RoundedCornerShape(24.dp)
                                                                 index == 0 -> RoundedCornerShape(
                                                                     topStart = 24.dp,
                                                                     topEnd = 24.dp,
                                                                     bottomStart = 6.dp,
                                                                     bottomEnd = 6.dp
                                                                 )
-                                                                index == sortedSongs.lastIndex -> RoundedCornerShape(
+                                                                index == visibleSongs.lastIndex -> RoundedCornerShape(
                                                                     topStart = 6.dp,
                                                                     topEnd = 6.dp,
                                                                     bottomStart = 24.dp,
@@ -1334,11 +1460,7 @@ fun AlbumBottomSheet(
                                                 HapticFeedbackType.LongPress
                                             )
                                             playAllPressed = true
-                                            if (sortedSongs.isNotEmpty()) {
-                                                onPlayAll(sortedSongs)
-                                            } else {
-                                                onPlayAll(album.songs)
-                                            }
+                                            onPlayAll(visibleSongs)
                                             scope.launch {
                                                 sheetState.hide()
                                             }.invokeOnCompletion {
@@ -1384,11 +1506,7 @@ fun AlbumBottomSheet(
                                                 HapticFeedbackType.LongPress
                                             )
                                             shufflePressed = true
-                                            if (sortedSongs.isNotEmpty()) {
-                                                onShufflePlay(sortedSongs)
-                                            } else {
-                                                onShufflePlay(album.songs)
-                                            }
+                                            onShufflePlay(visibleSongs)
                                             scope.launch {
                                                 sheetState.hide()
                                             }.invokeOnCompletion {
@@ -1433,7 +1551,7 @@ fun AlbumBottomSheet(
                     // SONGS SECTION HEADER
                     // ═══════════════════════════════════════════════════════════════════
                     AnimatedVisibility(
-                        visible = isVisible && sortedSongs.isNotEmpty(),
+                        visible = isVisible && visibleSongs.isNotEmpty(),
                         enter = fadeIn(tween(500, delayMillis = 500)) +
                                 slideInVertically(
                                     animationSpec = spring(
@@ -1462,7 +1580,7 @@ fun AlbumBottomSheet(
                                     )
                                     Text(
                                         text = formatDuration(
-                                            totalDuration,
+                                            tracksDuration,
                                             useHoursFormat
                                         ) + " total",
                                         style = MaterialTheme.typography.bodySmall,
@@ -1480,7 +1598,7 @@ fun AlbumBottomSheet(
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
                                         Text(
-                                            text = "${sortedSongs.size}",
+                                            text = "${visibleSongs.size}",
                                             style = MaterialTheme.typography.labelLarge,
                                             color = MaterialTheme.colorScheme.onPrimary,
                                             fontWeight = FontWeight.Bold,
@@ -1489,6 +1607,56 @@ fun AlbumBottomSheet(
                                                 vertical = 6.dp
                                             )
                                         )
+                                    }
+
+                                    if (shouldShowDiscFilter) {
+                                        Box {
+                                            FilledTonalButton(
+                                                onClick = {
+                                                    HapticUtils.performHapticFeedback(
+                                                        context,
+                                                        haptics,
+                                                        HapticFeedbackType.TextHandleMove
+                                                    )
+                                                    showSortMenu = false
+                                                    showDiscMenu = true
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                                modifier = Modifier.height(40.dp)
+                                            ) {
+                                                Text(
+                                                    text = selectedDiscLabel,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Filled.ArrowDropDown,
+                                                    contentDescription = context.getString(R.string.bottomsheet_disc_filter)
+                                                )
+                                            }
+
+                                            DiscFilterDropdownMenu(
+                                                expanded = showDiscMenu,
+                                                onDismissRequest = { showDiscMenu = false },
+                                                selectedDisc = selectedDiscFilterForAlbum,
+                                                availableDiscs = availableDiscs,
+                                                onSelectDisc = { discNumber ->
+                                                    HapticUtils.performHapticFeedback(
+                                                        context,
+                                                        haptics,
+                                                        HapticFeedbackType.LongPress
+                                                    )
+                                                    appSettings.setAlbumBottomSheetDiscFilter(discNumber)
+                                                    showDiscMenu = false
+                                                }
+                                            )
+                                        }
                                     }
 
                                     // Sort button
@@ -1510,6 +1678,7 @@ fun AlbumBottomSheet(
                                                     haptics,
                                                     HapticFeedbackType.TextHandleMove
                                                 )
+                                                showDiscMenu = false
                                                 showSortMenu = true
                                             },
                                             modifier = Modifier
@@ -1646,7 +1815,7 @@ fun AlbumBottomSheet(
                             .padding(horizontal = 12.dp)
                             .graphicsLayer { translationY = contentOffset }
                     ) {
-                        if (sortedSongs.isNotEmpty()) {
+                        if (visibleSongs.isNotEmpty()) {
                             LazyColumn(
                                 state = listState,
                                 modifier = Modifier.fillMaxSize(),
@@ -1654,9 +1823,22 @@ fun AlbumBottomSheet(
                                 userScrollEnabled = true
                             ) {
                                 itemsIndexed(
-                                    items = sortedSongs,
+                                    items = visibleSongs,
                                     key = { index, song -> "album_song_${song.id}_$index" }
                                 ) { index, song ->
+                                    val currentDisc = song.discNumber.coerceAtLeast(1)
+                                    val previousDisc = visibleSongs.getOrNull(index - 1)?.discNumber?.coerceAtLeast(1)
+                                    val nextDisc = visibleSongs.getOrNull(index + 1)?.discNumber?.coerceAtLeast(1)
+                                    val isFirstInDiscGroup = showDiscSections && previousDisc != currentDisc
+                                    val isLastInDiscGroup = showDiscSections && nextDisc != currentDisc
+
+                                    if (isFirstInDiscGroup) {
+                                        DiscSectionHeader(
+                                            discNumber = currentDisc,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                                        )
+                                    }
+
                                     var itemVisible by remember(song.id, index) { mutableStateOf(false) }
 
                                     // Animation progress for stagger effect
@@ -1705,14 +1887,27 @@ fun AlbumBottomSheet(
                                             song = song,
                                             index = index + 1,
                                             itemShape = when {
-                                                sortedSongs.size == 1 -> RoundedCornerShape(24.dp)
+                                                showDiscSections && isFirstInDiscGroup && isLastInDiscGroup -> RoundedCornerShape(24.dp)
+                                                showDiscSections && isFirstInDiscGroup -> RoundedCornerShape(
+                                                    topStart = 24.dp,
+                                                    topEnd = 24.dp,
+                                                    bottomStart = 6.dp,
+                                                    bottomEnd = 6.dp
+                                                )
+                                                showDiscSections && isLastInDiscGroup -> RoundedCornerShape(
+                                                    topStart = 6.dp,
+                                                    topEnd = 6.dp,
+                                                    bottomStart = 24.dp,
+                                                    bottomEnd = 24.dp
+                                                )
+                                                visibleSongs.size == 1 -> RoundedCornerShape(24.dp)
                                                 index == 0 -> RoundedCornerShape(
                                                     topStart = 24.dp,
                                                     topEnd = 24.dp,
                                                     bottomStart = 6.dp,
                                                     bottomEnd = 6.dp
                                                 )
-                                                index == sortedSongs.lastIndex -> RoundedCornerShape(
+                                                index == visibleSongs.lastIndex -> RoundedCornerShape(
                                                     topStart = 6.dp,
                                                     topEnd = 6.dp,
                                                     bottomStart = 24.dp,
@@ -2307,6 +2502,120 @@ fun ExpressiveSongItem(
             }
         }
     }
+}
+
+@Composable
+private fun DiscFilterDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    selectedDisc: Int,
+    availableDiscs: List<Int>,
+    onSelectDisc: (Int) -> Unit
+) {
+    val context = LocalContext.current
+
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.padding(4.dp)
+    ) {
+        val selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+        val selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer
+        val defaultTextColor = MaterialTheme.colorScheme.onSurface
+        val defaultIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+        Surface(
+            color = if (selectedDisc == 0) selectedContainerColor else Color.Transparent,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = context.getString(R.string.bottomsheet_all_discs),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (selectedDisc == 0) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selectedDisc == 0) selectedTextColor else defaultTextColor
+                    )
+                },
+                leadingIcon = {
+                    if (selectedDisc == 0) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = selectedTextColor
+                        )
+                    }
+                },
+                onClick = { onSelectDisc(0) },
+                colors = androidx.compose.material3.MenuDefaults.itemColors(
+                    textColor = if (selectedDisc == 0) selectedTextColor else defaultTextColor
+                )
+            )
+        }
+
+        availableDiscs.forEach { discNumber ->
+            val isSelected = selectedDisc == discNumber
+            Surface(
+                color = if (isSelected) selectedContainerColor else Color.Transparent,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = context.getString(R.string.bottomsheet_disc_option, discNumber),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) selectedTextColor else defaultTextColor
+                        )
+                    },
+                    leadingIcon = {
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = selectedTextColor
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.MusicNote,
+                                contentDescription = null,
+                                tint = defaultIconColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    },
+                    onClick = { onSelectDisc(discNumber) },
+                    colors = androidx.compose.material3.MenuDefaults.itemColors(
+                        textColor = if (isSelected) selectedTextColor else defaultTextColor
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscSectionHeader(
+    discNumber: Int,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = stringResource(R.string.bottomsheet_disc_option, discNumber),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    )
 }
 
 // Keep backward compatibility alias

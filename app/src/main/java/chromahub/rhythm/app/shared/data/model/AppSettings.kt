@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import chromahub.rhythm.app.worker.BackupWorker
+import chromahub.rhythm.app.worker.RhythmPulseNotificationWorker
 import chromahub.rhythm.app.worker.UpdateNotificationWorker
 import chromahub.rhythm.app.BuildConfig
 import java.util.Date // Import Date for timestamp
@@ -122,6 +123,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_PLAYLIST_DETAIL_SORT_ORDER = "playlist_detail_sort_order"
         private const val KEY_ARTIST_COLLABORATION_MODE = "artist_collaboration_mode"
         private const val KEY_LIBRARY_TAB_ORDER = "library_tab_order"
+        private const val KEY_LIBRARY_COMBINE_DISCS = "library_combine_discs"
         private const val KEY_PLAYER_CHIP_ORDER = "player_chip_order"
         private const val KEY_HIDDEN_LIBRARY_TABS = "hidden_library_tabs"
         private const val KEY_HIDDEN_PLAYER_CHIPS = "hidden_player_chips"
@@ -244,6 +246,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_UPDATE_CHANNEL = "update_channel" // New key for update channel
         private const val KEY_UPDATES_ENABLED = "updates_enabled" // Master switch for updates
         private const val KEY_UPDATE_NOTIFICATIONS_ENABLED = "update_notifications_enabled" // Push-style notifications
+        private const val KEY_UPDATE_STATUS_NOTIFICATIONS_ENABLED = "update_status_notifications_enabled" // Notify for no-update/error states
         private const val KEY_USE_SMART_UPDATE_POLLING = "use_smart_update_polling" // Use ETag/conditional requests
         private const val KEY_MEDIA_SCAN_MODE = "media_scan_mode" // Mode for media scanning: "blacklist" or "whitelist"
         private const val KEY_INCLUDE_HIDDEN_WHITELISTED_MEDIA = "include_hidden_whitelisted_media"
@@ -261,6 +264,10 @@ class AppSettings private constructor(context: Context) {
         
         // Notification Settings
     private const val KEY_USE_CUSTOM_NOTIFICATION = "use_custom_notification"
+    private const val KEY_RHYTHM_GUARD_ALERT_NOTIFICATIONS_ENABLED = "rhythm_guard_alert_notifications_enabled"
+    private const val KEY_RHYTHM_GUARD_TIMER_NOTIFICATIONS_ENABLED = "rhythm_guard_timer_notifications_enabled"
+    private const val KEY_RHYTHM_PULSE_NOTIFICATIONS_ENABLED = "rhythm_pulse_notifications_enabled"
+    private const val KEY_RHYTHM_PULSE_NOTIFICATION_INTERVAL_HOURS = "rhythm_pulse_notification_interval_hours"
     
     // UI Settings
     private const val KEY_USE_SETTINGS = "use_settings"
@@ -414,6 +421,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_HOME_SHOW_PLAY_BUTTONS = "home_show_play_buttons"
         private const val KEY_HOME_SECTION_ORDER = "home_section_order"
         private const val KEY_ALBUM_BOTTOM_SHEET_GRADIENT_BLUR = "album_bottom_sheet_gradient_blur"
+        private const val KEY_ALBUM_BOTTOM_SHEET_DISC_FILTER = "album_bottom_sheet_disc_filter"
         
         // Artist Separator Settings
         private const val KEY_ARTIST_SEPARATOR_ENABLED = "artist_separator_enabled"
@@ -635,6 +643,9 @@ class AppSettings private constructor(context: Context) {
             ?: defaultTabOrder
     )
     val libraryTabOrder: StateFlow<List<String>> = _libraryTabOrder.asStateFlow()
+
+    private val _libraryCombineDiscs = MutableStateFlow(prefs.getBoolean(KEY_LIBRARY_COMBINE_DISCS, false))
+    val libraryCombineDiscs: StateFlow<Boolean> = _libraryCombineDiscs.asStateFlow()
     
     // Player Chip Order (Add to Playlist and Edit chips are not reorderable - they stay fixed)
     private val defaultChipOrder = listOf("FAVORITE", "SPEED", "PITCH", "EQUALIZER", "SLEEP_TIMER", "LYRICS", "ALBUM", "ARTIST", "CAST")
@@ -1172,6 +1183,9 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     
     private val _updateNotificationsEnabled = MutableStateFlow(prefs.getBoolean(KEY_UPDATE_NOTIFICATIONS_ENABLED, BuildConfig.FLAVOR != "fdroid"))
     val updateNotificationsEnabled: StateFlow<Boolean> = _updateNotificationsEnabled.asStateFlow()
+
+    private val _updateStatusNotificationsEnabled = MutableStateFlow(prefs.getBoolean(KEY_UPDATE_STATUS_NOTIFICATIONS_ENABLED, false))
+    val updateStatusNotificationsEnabled: StateFlow<Boolean> = _updateStatusNotificationsEnabled.asStateFlow()
     
     private val _useSmartUpdatePolling = MutableStateFlow(prefs.getBoolean(KEY_USE_SMART_UPDATE_POLLING, BuildConfig.FLAVOR != "fdroid"))
     val useSmartUpdatePolling: StateFlow<Boolean> = _useSmartUpdatePolling.asStateFlow()
@@ -1217,6 +1231,26 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     // Notification Settings
     private val _useCustomNotification = MutableStateFlow(prefs.getBoolean(KEY_USE_CUSTOM_NOTIFICATION, false))
     val useCustomNotification: StateFlow<Boolean> = _useCustomNotification.asStateFlow()
+
+    private val _rhythmGuardAlertNotificationsEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_RHYTHM_GUARD_ALERT_NOTIFICATIONS_ENABLED, true)
+    )
+    val rhythmGuardAlertNotificationsEnabled: StateFlow<Boolean> = _rhythmGuardAlertNotificationsEnabled.asStateFlow()
+
+    private val _rhythmGuardTimerNotificationsEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_RHYTHM_GUARD_TIMER_NOTIFICATIONS_ENABLED, true)
+    )
+    val rhythmGuardTimerNotificationsEnabled: StateFlow<Boolean> = _rhythmGuardTimerNotificationsEnabled.asStateFlow()
+
+    private val _rhythmPulseNotificationsEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_RHYTHM_PULSE_NOTIFICATIONS_ENABLED, false)
+    )
+    val rhythmPulseNotificationsEnabled: StateFlow<Boolean> = _rhythmPulseNotificationsEnabled.asStateFlow()
+
+    private val _rhythmPulseNotificationIntervalHours = MutableStateFlow(
+        prefs.getInt(KEY_RHYTHM_PULSE_NOTIFICATION_INTERVAL_HOURS, 24).coerceIn(6, 72)
+    )
+    val rhythmPulseNotificationIntervalHours: StateFlow<Int> = _rhythmPulseNotificationIntervalHours.asStateFlow()
     
     // UI Settings
     private val _useSettings = MutableStateFlow(prefs.getBoolean(KEY_USE_SETTINGS, true))
@@ -1407,9 +1441,17 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         
         // Schedule update notification worker if enabled
         if (prefs.getBoolean(KEY_UPDATES_ENABLED, false) &&
-            prefs.getBoolean(KEY_UPDATE_NOTIFICATIONS_ENABLED, false) &&
+            prefs.getBoolean(KEY_AUTO_CHECK_FOR_UPDATES, false) &&
+            (
+                prefs.getBoolean(KEY_UPDATE_NOTIFICATIONS_ENABLED, false) ||
+                    prefs.getBoolean(KEY_UPDATE_STATUS_NOTIFICATIONS_ENABLED, false)
+                ) &&
             prefs.getBoolean(KEY_USE_SMART_UPDATE_POLLING, false)) {
             scheduleUpdateNotificationWorker()
+        }
+
+        if (prefs.getBoolean(KEY_RHYTHM_PULSE_NOTIFICATIONS_ENABLED, false)) {
+            scheduleRhythmPulseNotificationWorker()
         }
     }
     
@@ -1624,6 +1666,11 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     fun resetLibraryTabOrder() {
         prefs.edit().remove(KEY_LIBRARY_TAB_ORDER).apply()
         _libraryTabOrder.value = defaultTabOrder
+    }
+
+    fun setLibraryCombineDiscs(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LIBRARY_COMBINE_DISCS, enabled).apply()
+        _libraryCombineDiscs.value = enabled
     }
     
     fun setPlayerChipOrder(chipOrder: List<String>) {
@@ -2363,6 +2410,12 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     fun setAutoCheckForUpdates(enable: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_CHECK_FOR_UPDATES, enable).apply()
         _autoCheckForUpdates.value = enable
+
+        if (shouldRunUpdateNotificationWorker()) {
+            scheduleUpdateNotificationWorker()
+        } else {
+            cancelUpdateNotificationWorker()
+        }
     }
 
     fun setUpdateChannel(channel: String) {
@@ -2375,7 +2428,7 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _updatesEnabled.value = enable
         
         // Update WorkManager scheduling based on new state
-        if (enable && _updateNotificationsEnabled.value && _useSmartUpdatePolling.value) {
+        if (shouldRunUpdateNotificationWorker()) {
             scheduleUpdateNotificationWorker()
         } else {
             cancelUpdateNotificationWorker()
@@ -2387,7 +2440,18 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _updateNotificationsEnabled.value = enable
         
         // Update WorkManager scheduling
-        if (enable && _updatesEnabled.value && _useSmartUpdatePolling.value) {
+        if (shouldRunUpdateNotificationWorker()) {
+            scheduleUpdateNotificationWorker()
+        } else {
+            cancelUpdateNotificationWorker()
+        }
+    }
+
+    fun setUpdateStatusNotificationsEnabled(enable: Boolean) {
+        prefs.edit().putBoolean(KEY_UPDATE_STATUS_NOTIFICATIONS_ENABLED, enable).apply()
+        _updateStatusNotificationsEnabled.value = enable
+
+        if (shouldRunUpdateNotificationWorker()) {
             scheduleUpdateNotificationWorker()
         } else {
             cancelUpdateNotificationWorker()
@@ -2399,7 +2463,7 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _useSmartUpdatePolling.value = enable
         
         // Update WorkManager scheduling
-        if (enable && _updatesEnabled.value && _updateNotificationsEnabled.value) {
+        if (shouldRunUpdateNotificationWorker()) {
             scheduleUpdateNotificationWorker()
         } else {
             cancelUpdateNotificationWorker()
@@ -2419,6 +2483,10 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     fun setUpdateCheckIntervalHours(hours: Int) {
         prefs.edit().putInt(KEY_UPDATE_CHECK_INTERVAL_HOURS, hours).apply()
         _updateCheckIntervalHours.value = hours
+
+        if (shouldRunUpdateNotificationWorker()) {
+            scheduleUpdateNotificationWorker()
+        }
     }
 
     // Beta Program Methods
@@ -2472,6 +2540,37 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     fun setUseCustomNotification(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_USE_CUSTOM_NOTIFICATION, enabled).apply()
         _useCustomNotification.value = enabled
+    }
+
+    fun setRhythmGuardAlertNotificationsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_RHYTHM_GUARD_ALERT_NOTIFICATIONS_ENABLED, enabled).apply()
+        _rhythmGuardAlertNotificationsEnabled.value = enabled
+    }
+
+    fun setRhythmGuardTimerNotificationsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_RHYTHM_GUARD_TIMER_NOTIFICATIONS_ENABLED, enabled).apply()
+        _rhythmGuardTimerNotificationsEnabled.value = enabled
+    }
+
+    fun setRhythmPulseNotificationsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_RHYTHM_PULSE_NOTIFICATIONS_ENABLED, enabled).apply()
+        _rhythmPulseNotificationsEnabled.value = enabled
+
+        if (enabled) {
+            scheduleRhythmPulseNotificationWorker()
+        } else {
+            cancelRhythmPulseNotificationWorker()
+        }
+    }
+
+    fun setRhythmPulseNotificationIntervalHours(hours: Int) {
+        val safeHours = hours.coerceIn(6, 72)
+        prefs.edit().putInt(KEY_RHYTHM_PULSE_NOTIFICATION_INTERVAL_HOURS, safeHours).apply()
+        _rhythmPulseNotificationIntervalHours.value = safeHours
+
+        if (_rhythmPulseNotificationsEnabled.value) {
+            scheduleRhythmPulseNotificationWorker()
+        }
     }
     
     fun setForcePlayerCompactMode(enabled: Boolean) {
@@ -3003,6 +3102,13 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
      * Schedule periodic update notification checks using WorkManager
      * This implements a webhook-style system using smart polling
      */
+    private fun shouldRunUpdateNotificationWorker(): Boolean {
+        return _updatesEnabled.value &&
+            _autoCheckForUpdates.value &&
+            _useSmartUpdatePolling.value &&
+            (_updateNotificationsEnabled.value || _updateStatusNotificationsEnabled.value)
+    }
+
     private fun scheduleUpdateNotificationWorker() {
         try {
             // Get the check interval from settings (default 6 hours)
@@ -3022,6 +3128,36 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             Log.d("AppSettings", "Update notification worker scheduled: checks every $intervalHours hours")
         } catch (e: Exception) {
             Log.e("AppSettings", "Failed to schedule update notification worker", e)
+        }
+    }
+
+    private fun scheduleRhythmPulseNotificationWorker() {
+        try {
+            val intervalHours = _rhythmPulseNotificationIntervalHours.value.toLong().coerceIn(6L, 72L)
+
+            val workRequest = PeriodicWorkRequestBuilder<RhythmPulseNotificationWorker>(
+                intervalHours, TimeUnit.HOURS,
+                1, TimeUnit.HOURS
+            ).build()
+
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                RhythmPulseNotificationWorker.WORK_NAME,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                workRequest
+            )
+
+            Log.d("AppSettings", "Rhythm pulse worker scheduled: every $intervalHours hours")
+        } catch (e: Exception) {
+            Log.e("AppSettings", "Failed to schedule Rhythm pulse worker", e)
+        }
+    }
+
+    private fun cancelRhythmPulseNotificationWorker() {
+        try {
+            WorkManager.getInstance(context).cancelUniqueWork(RhythmPulseNotificationWorker.WORK_NAME)
+            Log.d("AppSettings", "Rhythm pulse worker cancelled")
+        } catch (e: Exception) {
+            Log.e("AppSettings", "Failed to cancel Rhythm pulse worker", e)
         }
     }
     
@@ -3571,6 +3707,9 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _albumSortOrder.value = prefs.getString(KEY_ALBUM_SORT_ORDER, "TRACK_NUMBER") ?: "TRACK_NUMBER"
         _artistCollaborationMode.value = prefs.getBoolean(KEY_ARTIST_COLLABORATION_MODE, false)
         _songsSortOrder.value = prefs.getString(KEY_SONGS_SORT_ORDER, "TITLE_ASC") ?: "TITLE_ASC"
+        _libraryCombineDiscs.value = prefs.getBoolean(KEY_LIBRARY_COMBINE_DISCS, false)
+        _albumBottomSheetDiscFilter.value = prefs.getInt(KEY_ALBUM_BOTTOM_SHEET_DISC_FILTER, 0).coerceAtLeast(0)
+        _albumBottomSheetGradientBlur.value = prefs.getBoolean(KEY_ALBUM_BOTTOM_SHEET_GRADIENT_BLUR, true)
         
         // Audio Device Settings
         _lastAudioDevice.value = prefs.getString(KEY_LAST_AUDIO_DEVICE, null)
@@ -3675,14 +3814,17 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _updateChannel.value = prefs.getString(KEY_UPDATE_CHANNEL, "stable") ?: "stable"
         _updatesEnabled.value = prefs.getBoolean(KEY_UPDATES_ENABLED, BuildConfig.FLAVOR != "fdroid")
         _updateNotificationsEnabled.value = prefs.getBoolean(KEY_UPDATE_NOTIFICATIONS_ENABLED, BuildConfig.FLAVOR != "fdroid")
+        _updateStatusNotificationsEnabled.value = prefs.getBoolean(KEY_UPDATE_STATUS_NOTIFICATIONS_ENABLED, false)
         _useSmartUpdatePolling.value = prefs.getBoolean(KEY_USE_SMART_UPDATE_POLLING, BuildConfig.FLAVOR != "fdroid")
         _mediaScanMode.value = prefs.getString(KEY_MEDIA_SCAN_MODE, "blacklist") ?: "blacklist"
         _includeHiddenWhitelistedMedia.value = prefs.getBoolean(KEY_INCLUDE_HIDDEN_WHITELISTED_MEDIA, true)
-        _updateCheckIntervalHours.value = prefs.getInt(KEY_UPDATE_CHECK_INTERVAL_HOURS, 24)
+        _updateCheckIntervalHours.value = prefs.getInt(KEY_UPDATE_CHECK_INTERVAL_HOURS, 6)
         
         // Re-schedule update notification worker if settings changed
-        if (_updatesEnabled.value && _updateNotificationsEnabled.value && _useSmartUpdatePolling.value) {
+        if (shouldRunUpdateNotificationWorker()) {
             scheduleUpdateNotificationWorker()
+        } else {
+            cancelUpdateNotificationWorker()
         }
         
         // Beta Program
@@ -3697,10 +3839,21 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         
         // Other settings
         _hapticFeedbackEnabled.value = prefs.getBoolean(KEY_HAPTIC_FEEDBACK_ENABLED, true)
+        _useCustomNotification.value = prefs.getBoolean(KEY_USE_CUSTOM_NOTIFICATION, false)
+        _rhythmGuardAlertNotificationsEnabled.value = prefs.getBoolean(KEY_RHYTHM_GUARD_ALERT_NOTIFICATIONS_ENABLED, true)
+        _rhythmGuardTimerNotificationsEnabled.value = prefs.getBoolean(KEY_RHYTHM_GUARD_TIMER_NOTIFICATIONS_ENABLED, true)
+        _rhythmPulseNotificationsEnabled.value = prefs.getBoolean(KEY_RHYTHM_PULSE_NOTIFICATIONS_ENABLED, false)
+        _rhythmPulseNotificationIntervalHours.value = prefs.getInt(KEY_RHYTHM_PULSE_NOTIFICATION_INTERVAL_HOURS, 24).coerceIn(6, 72)
         _forcePlayerCompactMode.value = prefs.getBoolean(KEY_FORCE_PLAYER_COMPACT_MODE, false)
         _onboardingCompleted.value = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false)
         _initialMediaScanCompleted.value = prefs.getBoolean(KEY_INITIAL_MEDIA_SCAN_COMPLETED, false)
         _genreDetectionCompleted.value = prefs.getBoolean(KEY_GENRE_DETECTION_COMPLETED, false)
+
+        if (_rhythmPulseNotificationsEnabled.value) {
+            scheduleRhythmPulseNotificationWorker()
+        } else {
+            cancelRhythmPulseNotificationWorker()
+        }
         
         // Blacklisted items
         _blacklistedSongs.value = try {
@@ -4297,6 +4450,14 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     fun setAlbumBottomSheetGradientBlur(value: Boolean) {
         _albumBottomSheetGradientBlur.value = value
         prefs.edit().putBoolean(KEY_ALBUM_BOTTOM_SHEET_GRADIENT_BLUR, value).apply()
+    }
+
+    private val _albumBottomSheetDiscFilter = MutableStateFlow(prefs.getInt(KEY_ALBUM_BOTTOM_SHEET_DISC_FILTER, 0).coerceAtLeast(0))
+    val albumBottomSheetDiscFilter: StateFlow<Int> = _albumBottomSheetDiscFilter.asStateFlow()
+    fun setAlbumBottomSheetDiscFilter(value: Int) {
+        val normalizedValue = value.coerceAtLeast(0)
+        _albumBottomSheetDiscFilter.value = normalizedValue
+        prefs.edit().putInt(KEY_ALBUM_BOTTOM_SHEET_DISC_FILTER, normalizedValue).apply()
     }
     
     // ==================== Expressive MaterialShapes Settings ====================

@@ -61,6 +61,20 @@
     <string name="settings_notification_style">Notification Style</string>
     <string name="settings_custom_notifications">Custom Notifications</string>
     <string name="settings_custom_notifications_desc">Use app\'s custom notification style instead of system media notification</string>
+    <string name="settings_notifications_updates_group">App Updates</string>
+    <string name="settings_notifications_rhythm_guard_group">Rhythm Guard</string>
+    <string name="settings_notifications_rhythm_pulse_group">Rhythm Pulse</string>
+    <string name="settings_update_notifications_merged_desc">Get alerts for new versions and background update check results</string>
+    <string name="settings_update_status_notifications">Update Status Notifications</string>
+    <string name="settings_update_status_notifications_desc">Get background check results such as up-to-date and check errors</string>
+    <string name="settings_rhythm_guard_alert_notifications">Safety Alert Notifications</string>
+    <string name="settings_rhythm_guard_alert_notifications_desc">Show a notification when Rhythm Guard detects risky volume or exposure</string>
+    <string name="settings_rhythm_guard_timer_notifications">Break Timer Notifications</string>
+    <string name="settings_rhythm_guard_timer_notifications_desc">Show notifications for scheduled breaks and active timeout countdowns</string>
+    <string name="settings_rhythm_pulse_notifications">Rhythm Pulse Notifications</string>
+    <string name="settings_rhythm_pulse_notifications_desc">Receive friendly reminders and listening tips.</string>
+    <string name="settings_rhythm_pulse_interval">Pulse Interval</string>
+    <string name="settings_rhythm_pulse_interval_dialog_title">Rhythm Pulse Interval</string>
     
     <!-- Settings - Queue & Playback -->
     <string name="settings_queue_playback">Queue and Playback</string>
@@ -119,9 +133,43 @@
     <string name="settings_enable_default_playlists_desc">Automatically create Recently Added and Most Played playlists</string>
     
     <!-- Operation Progress -->
-    <string name="operation_exporting_playlists">Exporting playlists…</string>
-    <string name="operation_exporting_playlists_location">Exporting playlists to selected location…</string>
-    <string name="operation_importing_playlist">Importing playlist…</string>
+    <string name="operation_exporting_playlists">Rhythm Library is exporting playlists…</string>
+    <string name="operation_exporting_playlists_location">Rhythm Library is exporting playlists to the selected location…</string>
+    <string name="operation_importing_playlist">Rhythm Library is importing a playlist…</string>
+    <string name="notification_operations_channel_name">Rhythm Library</string>
+    <string name="notification_operations_channel_desc">Progress and results for library scans and playlist actions</string>
+    <string name="notification_media_scan_title">Rhythm Library Scan</string>
+    <string name="notification_media_scan_stage_songs">Scanning audio files</string>
+    <string name="notification_media_scan_stage_saving">Saving your library</string>
+    <string name="notification_media_scan_stage_finishing">Completing scan</string>
+    <string name="notification_media_scan_complete_summary">Scan complete: %1$d songs, %2$d albums, %3$d artists</string>
+    <string name="notification_media_scan_complete_pending_setup">Scan complete. Rhythm is finishing library setup.</string>
+    <string name="notification_media_scan_cancelled">Scan cancelled.</string>
+    <string name="notification_media_scan_failed">Scan could not be completed. Please try again.</string>
+    <string name="notification_playlist_export_title">Rhythm Library Export</string>
+    <string name="notification_playlist_import_title">Rhythm Library Import</string>
+    <string name="notification_library_setup_title">Rhythm Library Setup</string>
+    <string name="notification_library_setup_complete_summary">Library setup complete: %1$d songs, %2$d albums, %3$d artists</string>
+    <string name="notification_playlist_not_found">Playlist export failed. The playlist was not found.</string>
+    <string name="notification_no_playlists_to_export">No playlists are available for export.</string>
+    <string name="notification_operation_timed_out">This request took too long. Please try again.</string>
+    <string name="notification_playlist_export_complete">Playlist export completed.</string>
+    <string name="notification_playlist_export_all_complete">Export completed for %1$d playlists.</string>
+    <string name="notification_playlist_export_failed">Playlist export failed. Please try again.</string>
+    <string name="notification_playlist_import_complete">Imported "%1$s" with %2$d songs.</string>
+    <string name="notification_playlist_import_failed">Playlist import failed. Please check the file and try again.</string>
+    <string name="notification_updater_channel_name">Rhythm Updater</string>
+    <string name="notification_updater_channel_desc">Download status for app updates</string>
+    <string name="notification_updater_title">Rhythm Updater</string>
+    <string name="notification_updater_downloading">Downloading update: %1$d%%</string>
+    <string name="notification_updater_download_complete">Update downloaded. Tap to install.</string>
+    <string name="notification_updater_available_title">Rhythm Updater: Update available</string>
+    <string name="notification_updater_available_text">A new version is ready. Tap to review and install.</string>
+    <string name="notification_sleep_timer_channel_name">Rhythm Sleep Timer</string>
+    <string name="notification_sleep_timer_channel_desc">Countdown and status for sleep timer actions</string>
+    <string name="notification_sleep_timer_title">Rhythm Sleep Timer</string>
+    <string name="notification_sleep_timer_pause_in">Playback will pause in %1$s.</string>
+    <string name="notification_sleep_timer_stop_in">Playback will stop in %1$s.</string>
     
     <!-- Dialogs -->
     <string name="dialog_cleanup_empty_playlists_title">Cleanup Empty Playlists?</string>
@@ -388,11 +436,11 @@
     <string name="library_tracks_count">%1$d of %2$d tracks</string>
     
     <!-- Background Processing States -->
-    <string name="scanning_media">Scanning media library…</string>
+    <string name="scanning_media">Scanning your music library…</string>
     <string name="detecting_genres">Detecting genres…</string>
     <string name="fetching_artwork">Fetching artwork…</string>
     <string name="extracting_metadata">Extracting audio metadata…</string>
-    <string name="processing_library">Processing library…</string>
+    <string name="processing_library">Finishing your library setup…</string>
     
     <string name="library_no_songs">No songs yet</string>
     <string name="library_no_artists">No artists found</string>
@@ -599,7 +647,7 @@
     <string name="onboarding_full_tour_prompt_title">Continue Full Setup Tour?</string>
     <string name="onboarding_full_tour_prompt_desc">Core setup is done. Continue for advanced customization, or finish now and explore the rest later from Settings.</string>
     <string name="onboarding_full_tour_prompt_tip_1">Full tour includes playback, theme, gesture, and media scan options.</string>
-    <string name="onboarding_full_tour_prompt_tip_2">You can reopen onboarding anytime from Settings > Developer &amp; Debugging.</string>
+    <string name="onboarding_full_tour_prompt_tip_2">You can reopen Rhythm Tour anytime from Settings > Developer &amp; Debugging.</string>
     <string name="onboarding_full_tour_prompt_tip_3">Nothing here is permanent. All choices can be changed later.</string>
     <string name="onboarding_continue_full_tour">Continue Full Tour</string>
     <string name="onboarding_finish_now">Finish Setup Now</string>
@@ -1052,6 +1100,8 @@
     <string name="updates_up_to_date_message">You are up to date!</string>
     <string name="updates_check_frequency">How often should Rhythm check for updates?</string>
     <string name="updates_experimental_coming">More experimental features coming soon in future updates</string>
+    <string name="settings_interval_every_48_hours">Every 48 hours</string>
+    <string name="settings_interval_every_72_hours">Every 72 hours</string>
     
     <!-- Cache -->
     <string name="cache_total_size_label">Total Cache Size:</string>
@@ -1486,6 +1536,9 @@
     <string name="bottomsheet_play_all">Play All</string>
     <string name="bottomsheet_tracks">Tracks</string>
     <string name="bottomsheet_sort_by">Sort by</string>
+    <string name="bottomsheet_all_discs">All Discs</string>
+    <string name="bottomsheet_disc_option">Disc %1$d</string>
+    <string name="bottomsheet_disc_filter">Filter by Disc</string>
     <string name="bottomsheet_no_songs_album">No songs in this album</string>
     
     <!-- Bottom Sheet: Home Section Order -->
@@ -1599,17 +1652,25 @@
     <string name="fallback_unknown_file">Unknown File</string>
     
     <!-- Service Notifications -->
-    <string name="service_app_updates">App Updates</string>
+    <string name="service_app_updates">Rhythm Updater</string>
+    <string name="service_update_status">Rhythm Updater Status</string>
+    <string name="service_rhythm_pulse">Rhythm Pulse</string>
+    <string name="service_rhythm_guard_alerts">Rhythm Guard Alerts</string>
+    <string name="service_rhythm_guard_timers">Rhythm Guard Timers</string>
     <string name="service_rhythm_music">Rhythm Music</string>
-    <string name="service_starting">Starting service…</string>
-    <string name="service_loading_settings">Loading settings…</string>
-    <string name="service_setup_components">Setting up components…</string>
-    <string name="service_initializing_player">Initializing player…</string>
-    <string name="service_creating_controls">Creating playback controls…</string>
-    <string name="service_setup_media_session">Setting up media session…</string>
-    <string name="service_initializing_controller">Initializing media controller…</string>
-    <string name="service_ready">Service ready</string>
-    <string name="service_init_failed">Initialization failed</string>
+    <string name="service_update_status_desc">Status results for background update checks</string>
+    <string name="service_rhythm_pulse_desc">Friendly listening reminders and tips from Rhythm</string>
+    <string name="service_rhythm_guard_alerts_desc">Safety alerts from Rhythm Guard</string>
+    <string name="service_rhythm_guard_timers_desc">Rhythm Guard break and timeout reminders</string>
+    <string name="service_starting">Rhythm is starting.</string>
+    <string name="service_loading_settings">Rhythm is loading your settings.</string>
+    <string name="service_setup_components">Rhythm is preparing core components.</string>
+    <string name="service_initializing_player">Rhythm is preparing playback.</string>
+    <string name="service_creating_controls">Rhythm is creating playback controls.</string>
+    <string name="service_setup_media_session">Rhythm is preparing the media session.</string>
+    <string name="service_initializing_controller">Rhythm is connecting the media controller.</string>
+    <string name="service_ready">Rhythm is ready.</string>
+    <string name="service_init_failed">Rhythm could not start. Please reopen the app.</string>
     
     <!-- Crash Activity -->
     <string name="crash_bug_report">Bug Report</string>
@@ -1851,6 +1912,12 @@
     <string name="settings_rhythm_guard_break_resume_search_desc">Set how long scheduled listening breaks last by default</string>
     <string name="settings_rhythm_guard_enable_search_title">Rhythm Guard Power</string>
     <string name="settings_rhythm_guard_enable_search_desc">Enable or disable Rhythm Guard protections</string>
+    <string name="settings_rhythm_guard_notification_alert_title">Rhythm Guard Safety Alert</string>
+    <string name="settings_rhythm_guard_notification_timer_active_title">Rhythm Guard Timeout Active</string>
+    <string name="settings_rhythm_guard_notification_timer_active_text">Playback resumes in %1$s.</string>
+    <string name="settings_rhythm_guard_notification_timer_scheduled_title">Rhythm Guard Break Scheduled</string>
+    <string name="settings_rhythm_guard_notification_timer_scheduled_text">A listening break starts in %1$s.</string>
+    <string name="settings_rhythm_guard_notification_tap_open">Tap to view timeout details.</string>
     <string name="label_enabled">Enabled</string>
     <string name="label_disabled">Disabled</string>
     
@@ -2559,8 +2626,8 @@
     <string name="settings_codec_monitoring_desc">Log audio codec and format info for debugging. View in Logcat with tag \'CodecMonitor\'</string>
     <string name="settings_audio_device_logging">Audio Device Logging</string>
     <string name="settings_audio_device_logging_desc">Log audio device changes (Bluetooth, headphones, etc.)</string>
-    <string name="settings_launch_onboarding">Launch Onboarding</string>
-    <string name="settings_launch_onboarding_desc">Reset and relaunch the onboarding experience</string>
+    <string name="settings_launch_onboarding">Launch Rhythm Tour</string>
+    <string name="settings_launch_onboarding_desc">Reset and relaunch the Rhythm Tour experience</string>
     <string name="settings_test_crash">Test Crash</string>
     <string name="settings_test_crash_desc">Forcibly crash the app to test crash handling and reporting</string>
     <string name="settings_music_mode_dialog_desc">Choose your music source</string>
@@ -2847,8 +2914,8 @@
     <string name="settings_exp_codec_monitoring_desc">Log audio info</string>
     <string name="settings_exp_audio_device_logging">Audio Device Logging</string>
     <string name="settings_exp_audio_device_logging_desc">Log device changes</string>
-    <string name="settings_exp_launch_onboarding">Launch Onboarding</string>
-    <string name="settings_exp_launch_onboarding_desc">Relaunch onboarding</string>
+    <string name="settings_exp_launch_onboarding">Launch Rhythm Tour</string>
+    <string name="settings_exp_launch_onboarding_desc">Relaunch Rhythm Tour</string>
     <string name="settings_exp_test_crash">Test Crash</string>
     <string name="settings_exp_test_crash_desc">Force app crash</string>
     <string name="settings_scrobbling_enabled">Enable Scrobbling</string>
@@ -2875,6 +2942,18 @@
     <!-- Notifications Search Strings -->
     <string name="settings_notifications_custom">Custom Notifications</string>
     <string name="settings_notifications_custom_desc">Custom style for controls</string>
+    <string name="settings_notifications_update_available">Update Available Notifications</string>
+    <string name="settings_notifications_update_available_desc">Alerts when a new app version is available</string>
+    <string name="settings_notifications_update_status">Update Status Notifications</string>
+    <string name="settings_notifications_update_status_desc">Background check result alerts</string>
+    <string name="settings_notifications_rhythm_guard_alerts">Rhythm Guard Safety Alerts</string>
+    <string name="settings_notifications_rhythm_guard_alerts_desc">Notify when listening risk warnings are triggered</string>
+    <string name="settings_notifications_rhythm_guard_timers">Rhythm Guard Break Timers</string>
+    <string name="settings_notifications_rhythm_guard_timers_desc">Notify for scheduled breaks and timeout countdowns</string>
+    <string name="settings_notifications_rhythm_pulse">Rhythm Pulse</string>
+    <string name="settings_notifications_rhythm_pulse_desc">Friendly reminders and listening tips.</string>
+    <string name="settings_notifications_rhythm_pulse_interval">Rhythm Pulse Interval</string>
+    <string name="settings_notifications_rhythm_pulse_interval_desc">How often pulse notifications are delivered</string>
 
     <!-- Expressive Shapes Search Strings -->
     <string name="settings_expressive_shapes_enabled">Expressive Shapes</string>
@@ -2899,6 +2978,8 @@
     <string name="settings_library_settings">Library Experience</string>
     <string name="settings_library_settings_desc">Ratings, organization and artwork behavior</string>
     <string name="settings_library_group_organization">Organization &amp; Ratings</string>
+    <string name="settings_library_combine_discs">Combine Discs</string>
+    <string name="settings_library_combine_discs_desc">Merge multi-disc albums into one continuous sort</string>
     <string name="settings_show_keyboard_on_search_open">Auto Focus Search</string>
     <string name="settings_show_keyboard_on_search_open_desc">Show keyboard when Search opens</string>
     <string name="settings_library_group_artwork">Artwork Rendering</string>
@@ -2987,8 +3068,8 @@
     <string name="exp_codec_monitoring">Codec Monitoring</string>
     <string name="exp_codec_monitoring_desc">Log audio codec and format info for debugging</string>
     <string name="exp_developer_debugging">Developer &amp; Debugging</string>
-    <string name="exp_launch_onboarding">Launch Onboarding</string>
-    <string name="exp_launch_onboarding_desc">Reset and relaunch the onboarding experience</string>
+    <string name="exp_launch_onboarding">Launch Rhythm Tour</string>
+    <string name="exp_launch_onboarding_desc">Reset and relaunch the Rhythm Tour experience</string>
     <string name="exp_local_files">Local Files</string>
     <string name="exp_local_files_desc">Local files from device</string>
     <string name="exp_music_mode">Music Mode</string>

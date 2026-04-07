@@ -1332,7 +1332,7 @@ fun LibraryScreen(
             // Background Processing Loader - shown between tabs and content
             val isBackgroundProcessing by musicViewModel.isBackgroundProcessing.collectAsState()
             val isMediaScanning by musicViewModel.isMediaScanning.collectAsState()
-            val isGenreDetectionRunning by musicViewModel.isGenreDetectionComplete.collectAsState()
+            val isGenreDetectionRunning by musicViewModel.isGenreDetectionRunning.collectAsState()
             val isFetchingArtwork by musicViewModel.isFetchingArtwork.collectAsState()
             val isExtractingMetadata by musicViewModel.isExtractingMetadata.collectAsState()
             
@@ -1513,7 +1513,8 @@ fun LibraryScreen(
                             multiSelectionState = multiSelectionState,
                             onSongLongPress = onSongLongPress,
                             onSongSelectionToggle = onSongSelectionToggle,
-                            onShowMultiSelectionSheet = { showMultiSelectionSheet = true }
+                            onShowMultiSelectionSheet = { showMultiSelectionSheet = true },
+                            onRefreshClick = onRefreshClick
                         )
                         }
                         "PLAYLISTS" -> SingleCardPlaylistsContent(
@@ -1523,7 +1524,8 @@ fun LibraryScreen(
                             onCreatePlaylist = { showCreatePlaylistDialog = true },
                             onImportPlaylist = { showImportDialog = true },
                             onExportPlaylists = { showBulkExportDialog = true },
-                            appSettings = appSettings
+                            appSettings = appSettings,
+                            onRefreshClick = onRefreshClick
                         )
                         "ALBUMS" -> SingleCardAlbumsContent(
                             albums = albums,
@@ -1536,7 +1538,8 @@ fun LibraryScreen(
                             haptics = haptics,
                             appSettings = appSettings,
                             onPlayQueue = onPlayQueue,
-                            onShuffleQueue = onShuffleQueue
+                            onShuffleQueue = onShuffleQueue,
+                            onRefreshClick = onRefreshClick
                         )
                         "ARTISTS" -> SingleCardArtistsContent(
                             artists = artists,
@@ -1545,7 +1548,8 @@ fun LibraryScreen(
                             },
                             haptics = haptics,
                             onPlayQueue = onPlayQueue,
-                            onShuffleQueue = onShuffleQueue
+                            onShuffleQueue = onShuffleQueue,
+                            onRefreshClick = onRefreshClick
                         )
                         "EXPLORER" -> SingleCardExplorerContent(
                             songs = songs,
@@ -1863,7 +1867,8 @@ fun SingleCardSongsContent(
     multiSelectionState: chromahub.rhythm.app.features.local.presentation.viewmodel.MultiSelectionStateHolder? = null,
     onSongLongPress: (Song) -> Unit = {},
     onSongSelectionToggle: (Song) -> Unit = {},
-    onShowMultiSelectionSheet: () -> Unit = {}
+    onShowMultiSelectionSheet: () -> Unit = {},
+    onRefreshClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val appSettings = remember { AppSettings.getInstance(context) }
@@ -2274,7 +2279,8 @@ fun SingleCardSongsContent(
     if (preparedSongs.isEmpty()) {
         EmptyState(
             message = context.getString(R.string.library_no_songs),
-            icon = RhythmIcons.Music.Song
+            icon = RhythmIcons.Music.Song,
+            onRefresh = onRefreshClick
         )
     } else {
         LazyColumn(
@@ -2733,7 +2739,8 @@ fun SingleCardPlaylistsContent(
     onCreatePlaylist: (() -> Unit)? = null,
     onImportPlaylist: (() -> Unit)? = null,
     onExportPlaylists: (() -> Unit)? = null,
-    appSettings: AppSettings
+    appSettings: AppSettings,
+    onRefreshClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val playlistViewType by appSettings.playlistViewType.collectAsState()
@@ -2791,7 +2798,8 @@ fun SingleCardPlaylistsContent(
     if (preparedPlaylists.isEmpty()) {
         EmptyState(
             message = "No playlists yet\nCreate your first playlist using the + button",
-            icon = RhythmIcons.Music.Playlist
+            icon = RhythmIcons.Music.Playlist,
+            onRefresh = onRefreshClick
         )
     } else {
         if (playlistViewType == PlaylistViewType.GRID) {
@@ -2975,7 +2983,8 @@ fun SingleCardAlbumsContent(
     haptics: androidx.compose.ui.hapticfeedback.HapticFeedback,
     appSettings: AppSettings,
     onPlayQueue: (List<Song>) -> Unit = { _ -> },
-    onShuffleQueue: (List<Song>) -> Unit = { _ -> }
+    onShuffleQueue: (List<Song>) -> Unit = { _ -> },
+    onRefreshClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val albumViewType by appSettings.albumViewType.collectAsState()
@@ -3020,7 +3029,8 @@ fun SingleCardAlbumsContent(
     if (preparedAlbums.isEmpty()) {
         EmptyState(
             message = "No albums yet",
-            icon = RhythmIcons.Music.Album
+            icon = RhythmIcons.Music.Album,
+            onRefresh = onRefreshClick
         )
     } else {
                         if (albumViewType == AlbumViewType.GRID) {
@@ -4731,7 +4741,8 @@ fun LibraryAlbumItem(
 @Composable
 fun EmptyState(
     message: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onRefresh: (() -> Unit)? = null
 ) {
     Box(
         modifier = Modifier
@@ -4752,6 +4763,7 @@ fun EmptyState(
                 modifier = Modifier.padding(48.dp)
             ) {
                 val context = LocalContext.current
+                val haptics = LocalHapticFeedback.current
                 val animatedSize by animateFloatAsState(
                     targetValue = 1f,
                     animationSpec = spring(
@@ -4812,6 +4824,29 @@ fun EmptyState(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.graphicsLayer { alpha = animatedAlpha * 0.8f }
                 )
+
+                if (onRefresh != null) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    FilledTonalButton(
+                        onClick = {
+                            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
+                            onRefresh()
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = RhythmIcons.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Refresh")
+                    }
+                }
             }
         }
     }
@@ -5200,7 +5235,8 @@ fun SingleCardArtistsContent(
     onArtistClick: (Artist) -> Unit,
     haptics: androidx.compose.ui.hapticfeedback.HapticFeedback,
     onPlayQueue: (List<Song>) -> Unit = { _ -> },
-    onShuffleQueue: (List<Song>) -> Unit = { _ -> }
+    onShuffleQueue: (List<Song>) -> Unit = { _ -> },
+    onRefreshClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val viewModel = viewModel<chromahub.rhythm.app.viewmodel.MusicViewModel>()
@@ -5266,7 +5302,8 @@ fun SingleCardArtistsContent(
     if (sortedArtists.isEmpty()) {
         EmptyState(
             message = "No artists yet",
-            icon = RhythmIcons.Artist
+            icon = RhythmIcons.Artist,
+            onRefresh = onRefreshClick
         )
         return
     }

@@ -95,6 +95,22 @@ fun StreamingNavigation(
         StreamingScreen.Library.route,
         StreamingScreen.Search.route
     )
+
+    val navigateToTopLevel: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+    val navigateBackOrHome: () -> Unit = {
+        val popped = navController.popBackStack()
+        if (!popped) {
+            navigateToTopLevel(StreamingScreen.Home.route)
+        }
+    }
     
     if (isTablet) {
         // Tablet layout with Navigation Rail
@@ -149,8 +165,8 @@ fun StreamingNavigation(
                     exitTransition = { fadeOut(animationSpec = tween(300)) }
                 ) {
                     StreamingHomeScreen(
-                        onNavigateToSearch = { navController.navigate(StreamingScreen.Search.route) },
-                        onNavigateToLibrary = { navController.navigate(StreamingScreen.Library.route) },
+                        onNavigateToSearch = { navigateToTopLevel(StreamingScreen.Search.route) },
+                        onNavigateToLibrary = { navigateToTopLevel(StreamingScreen.Library.route) },
                         onNavigateToSettings = onNavigateToSettings,
                         onSwitchToLocalMode = onSwitchToLocalMode
                     )
@@ -175,7 +191,7 @@ fun StreamingNavigation(
                     }
                 ) {
                     StreamingSearchScreen(
-                        onBack = { navController.popBackStack() }
+                        onBack = navigateBackOrHome
                     )
                 }
                 
@@ -282,8 +298,8 @@ fun StreamingNavigation(
                     exitTransition = { fadeOut(animationSpec = tween(300)) }
                 ) {
                     StreamingHomeScreen(
-                        onNavigateToSearch = { navController.navigate(StreamingScreen.Search.route) },
-                        onNavigateToLibrary = { navController.navigate(StreamingScreen.Library.route) },
+                        onNavigateToSearch = { navigateToTopLevel(StreamingScreen.Search.route) },
+                        onNavigateToLibrary = { navigateToTopLevel(StreamingScreen.Library.route) },
                         onNavigateToSettings = onNavigateToSettings,
                         onSwitchToLocalMode = onSwitchToLocalMode
                     )
@@ -308,7 +324,7 @@ fun StreamingNavigation(
                     }
                 ) {
                     StreamingSearchScreen(
-                        onBack = { navController.popBackStack() }
+                        onBack = navigateBackOrHome
                     )
                 }
                 
@@ -555,7 +571,13 @@ private fun StreamingBottomNavBar(
                 IconButton(
                     onClick = {
                         HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.LongPress)
-                        navController.navigate(StreamingScreen.Search.route)
+                        navController.navigate(StreamingScreen.Search.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
                     modifier = Modifier.fillMaxSize()
                 ) {
@@ -613,10 +635,11 @@ private fun StreamingNavigationRail(
                         unselectedIcon = Icons.Outlined.Home,
                         onClick = {
                             navController.navigate(StreamingScreen.Home.route) {
-                                popUpTo(StreamingScreen.Home.route) {
-                                    inclusive = true
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
                                 }
                                 launchSingleTop = true
+                                restoreState = true
                             }
                         }
                     ),
@@ -627,8 +650,11 @@ private fun StreamingNavigationRail(
                         unselectedIcon = Icons.Outlined.LibraryMusic,
                         onClick = {
                             navController.navigate(StreamingScreen.Library.route) {
-                                popUpTo(StreamingScreen.Home.route)
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
                                 launchSingleTop = true
+                                restoreState = true
                             }
                         }
                     ),
@@ -638,7 +664,13 @@ private fun StreamingNavigationRail(
                         selectedIcon = Icons.Filled.Search,
                         unselectedIcon = Icons.Outlined.Search,
                         onClick = {
-                            navController.navigate(StreamingScreen.Search.route)
+                            navController.navigate(StreamingScreen.Search.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
                         }
                     ),
                     StreamingNavRailItem(

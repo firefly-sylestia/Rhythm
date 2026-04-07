@@ -3,6 +3,7 @@ package chromahub.rhythm.app.features.local.presentation.navigation
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -383,12 +384,17 @@ fun LocalNavigation(
     LaunchedEffect(navController) {
         navController.currentBackStackEntryFlow.collect { backStackEntry ->
             currentRoute = backStackEntry.destination.route ?: Screen.Home.route
+            val routeBase = currentRoute.substringBefore("?")
             // Update selectedTab based on current route
             when {
                 currentRoute == Screen.Home.route -> selectedTab = 0
-                currentRoute.startsWith("library") -> selectedTab = 1
+                routeBase == Screen.Library.route.substringBefore("?") -> selectedTab = 1
             }
         }
+    }
+
+    val isLibraryRoute = remember(currentRoute) {
+        currentRoute.substringBefore("?") == Screen.Library.route.substringBefore("?")
     }
 
     // Provide dynamic mini-player padding with comprehensive navigation handling
@@ -396,10 +402,14 @@ fun LocalNavigation(
         currentRoute != Screen.Player.route &&
         currentRoute != Screen.Search.route
     val showNavBar = remember(currentRoute) {
-        currentRoute == Screen.Home.route || currentRoute.startsWith("library") || currentRoute == Screen.Search.route || currentRoute == Screen.Settings.route || currentRoute == Screen.ListeningStats.route
+        currentRoute == Screen.Home.route ||
+            isLibraryRoute ||
+            currentRoute == Screen.Search.route ||
+            currentRoute == Screen.Settings.route ||
+            currentRoute == Screen.ListeningStats.route
     }
     val showBottomNav = remember(currentRoute) {
-        currentRoute == Screen.Home.route || currentRoute.startsWith("library")
+        currentRoute == Screen.Home.route || isLibraryRoute
     }
     
     // Calculate content bottom padding based on visible UI elements
@@ -645,6 +655,50 @@ private fun LocalNavigationContent(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val navigateToTopLevel: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+    val navigateBackOrToLanding: () -> Unit = {
+        val popped = navController.popBackStack()
+        if (!popped) {
+            navController.navigate(startDestination) {
+                popUpTo(navController.graph.id) {
+                    inclusive = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+    val navigateToLanding: () -> Unit = {
+        navController.navigate(startDestination) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+    val navigateBackOrToSettings: () -> Unit = {
+        val popped = navController.popBackStack()
+        if (!popped) {
+            navigateToTopLevel(Screen.Settings.route)
+        }
+    }
+    val isOnStartRoute = remember(currentRoute, startDestination) {
+        currentRoute.substringBefore("?") == startDestination.substringBefore("?")
+    }
+
+    // Ensure Android system back mirrors toolbar back behavior on all non-start routes.
+    BackHandler(enabled = !isOnStartRoute) {
+        navigateBackOrToLanding()
+    }
 
     Scaffold(
         snackbarHost = {
@@ -1145,11 +1199,11 @@ private fun LocalNavigationContent(
                         },
                         onSkipNext = onSkipNext,
                         onSearchClick = {
-                            navController.navigate(Screen.Search.route)
+                            navigateToTopLevel(Screen.Search.route)
                         },
                         onSettingsClick = {
                             // Navigate to the settings screen
-                            navController.navigate(Screen.Settings.route)
+                            navigateToTopLevel(Screen.Settings.route)
                         },
                         onNavigateToLibrary = {
                             // Navigate to library with playlists tab selected
@@ -1178,7 +1232,7 @@ private fun LocalNavigationContent(
                             }
                         },
                         onNavigateToStats = {
-                            navController.navigate(Screen.ListeningStats.route)
+                            navigateToTopLevel(Screen.ListeningStats.route)
                         },
                         onNavigateToArtist = { artist ->
                             navController.navigate(Screen.ArtistDetail.createRoute(artist.name))
@@ -1240,7 +1294,7 @@ private fun LocalNavigationContent(
                             viewModel.createPlaylist(name)
                         },
                         onBack = {
-                            navController.popBackStack()
+                            navigateToLanding()
                         },
                         onNavigateToArtist = { artist ->
                             navController.navigate(Screen.ArtistDetail.createRoute(artist.name))
@@ -1271,7 +1325,7 @@ private fun LocalNavigationContent(
                     // Use the settings screen (now the default)
                     SettingsScreenWrapper(
                         onBack = {
-                            navController.popBackStack()
+                            navigateBackOrToLanding()
                         },
                         appSettings = appSettings,
                         navController = navController,
@@ -1280,50 +1334,50 @@ private fun LocalNavigationContent(
                 }
                 // Tuner Settings Subroutes
                 composable(Screen.TunerNotifications.route) {
-                    NotificationsSettingsScreen(onBackClick = { navController.popBackStack() })
+                    NotificationsSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerExperimentalFeatures.route) {
-                    ExperimentalFeaturesScreen(onBackClick = { navController.popBackStack() })
+                    ExperimentalFeaturesScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerAbout.route) {
                     chromahub.rhythm.app.features.local.presentation.screens.settings.AboutScreen(
-                        onBackClick = { navController.popBackStack() },
+                        onBackClick = navigateBackOrToSettings,
                         onNavigateToUpdates = { navController.navigate(Screen.TunerUpdates.route) }
                     )
                 }
 
                 composable(Screen.TunerUpdates.route) {
-                    UpdatesSettingsScreen(onBackClick = { navController.popBackStack() })
+                    UpdatesSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerMediaScan.route) {
-                    MediaScanSettingsScreen(onBackClick = { navController.popBackStack() })
+                    MediaScanSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerPlaylists.route) {
-                    PlaylistsSettingsScreen(onBackClick = { navController.popBackStack() })
+                    PlaylistsSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerApiManagement.route) {
-                    ApiManagementSettingsScreen(onBackClick = { navController.popBackStack() })
+                    ApiManagementSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerCacheManagement.route) {
-                    CacheManagementSettingsScreen(onBackClick = { navController.popBackStack() })
+                    CacheManagementSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerBackupRestore.route) {
-                    BackupRestoreSettingsScreen(onBackClick = { navController.popBackStack() })
+                    BackupRestoreSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerLibraryTabOrder.route) {
-                    LibraryTabOrderSettingsScreen(onBackClick = { navController.popBackStack() })
+                    LibraryTabOrderSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerThemeCustomization.route) {
-                    ThemeCustomizationSettingsScreen(onBackClick = { navController.popBackStack() })
+                    ThemeCustomizationSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(
@@ -1357,7 +1411,7 @@ private fun LocalNavigationContent(
                         SleepTimerBottomSheetNew(
                             onDismiss = {
                                 showBottomSheet = false
-                                navController.popBackStack()
+                                navigateBackOrToSettings()
                             },
                             currentSong = currentSong,
                             isPlaying = isPlaying,
@@ -1366,24 +1420,24 @@ private fun LocalNavigationContent(
                     } else {
                         // Navigate back if bottom sheet is dismissed without opening
                         LaunchedEffect(Unit) {
-                            navController.popBackStack()
+                            navigateBackOrToSettings()
                         }
                     }
                 }
 
                 composable(Screen.TunerCrashLogHistory.route) {
                     CrashLogHistorySettingsScreen(
-                        onBackClick = { navController.popBackStack() },
+                        onBackClick = navigateBackOrToSettings,
                         appSettings = appSettings
                     )
                 }
 
                 composable(Screen.TunerQueuePlayback.route) {
-                    QueuePlaybackSettingsScreen(onBackClick = { navController.popBackStack() })
+                    QueuePlaybackSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(Screen.TunerHomeScreen.route) {
-                    HomeScreenCustomizationSettingsScreen(onBackClick = { navController.popBackStack() })
+                    HomeScreenCustomizationSettingsScreen(onBackClick = navigateBackOrToSettings)
                 }
 
                 composable(
@@ -1761,7 +1815,7 @@ private fun LocalNavigationContent(
                         },
                         onLyricsSeek = onLyricsSeek,
                         onBack = {
-                            navController.popBackStack()
+                            navigateBackOrToLanding()
                         },
                         onLocationClick = {
                             // Show the system output switcher dialog directly
@@ -1965,7 +2019,7 @@ private fun LocalNavigationContent(
                                 viewModel.playSongFromContext(song, playlistSongs, playlist.name)
                             },
                             onBack = {
-                                navController.popBackStack()
+                                navigateBackOrToLanding()
                             },
                             onRemoveSong = { song, message ->
                                 viewModel.removeSongFromPlaylist(
@@ -1982,7 +2036,7 @@ private fun LocalNavigationContent(
                             },
                             onDeletePlaylist = {
                                 viewModel.deletePlaylist(playlistId)
-                                navController.popBackStack()
+                                navigateBackOrToLanding()
                             },
                             onAddSongsToPlaylist = {
                                 // Set the target playlist ID and navigate to search screen
@@ -2113,7 +2167,7 @@ private fun LocalNavigationContent(
                     ArtistDetailScreen(
                         artistName = artistName,
                         onBack = {
-                            navController.popBackStack()
+                            navigateBackOrToLanding()
                         },
                         onSongClick = onPlaySong,
                         onAlbumClick = { album ->
@@ -2303,7 +2357,7 @@ private fun LocalNavigationContent(
                                 AlertDialog(
                                     onDismissRequest = {
                                         viewModel.clearTargetPlaylistForAddingSongs()
-                                        navController.popBackStack()
+                                        navigateBackOrToLanding()
                                     },
                                     icon = {
                                         Icon(
@@ -2317,7 +2371,7 @@ private fun LocalNavigationContent(
                                     confirmButton = {
                                         Button(onClick = {
                                             viewModel.clearTargetPlaylistForAddingSongs()
-                                            navController.popBackStack()
+                                            navigateBackOrToLanding()
                                         }) {
                                             Icon(
                                                 imageVector = Icons.Filled.CheckCircle,
@@ -2339,7 +2393,7 @@ private fun LocalNavigationContent(
                                     onSearchQueryChange = { searchQuery = it },
                                     onBackClick = {
                                         viewModel.clearTargetPlaylistForAddingSongs()
-                                        navController.popBackStack()
+                                        navigateBackOrToLanding()
                                     },
                                     onAddSongsToPlaylist = { songs ->
                                         // Add multiple songs to the playlist using batch operation
@@ -2375,7 +2429,7 @@ private fun LocalNavigationContent(
                             // Playlist not found, go back
                             LaunchedEffect(Unit) {
                                 viewModel.clearTargetPlaylistForAddingSongs()
-                                navController.popBackStack()
+                                navigateBackOrToLanding()
                             }
                         }
                     }
@@ -2407,13 +2461,13 @@ private fun LocalNavigationContent(
                                         }
                                     }
                                     viewModel.clearSelectedSongForPlaylist()
-                                    navController.popBackStack()
+                                    navigateBackOrToLanding()
                                 }
                             )
                         } else {
                             // Navigate back to the player screen and show the bottom sheet there
                             LaunchedEffect(Unit) {
-                                navController.popBackStack()
+                                navigateBackOrToLanding()
                             }
                         }
                     } else {
@@ -2421,7 +2475,7 @@ private fun LocalNavigationContent(
                         LaunchedEffect(Unit) {
                             viewModel.clearSelectedSongForPlaylist()
                             viewModel.clearTargetPlaylistForAddingSongs()
-                            navController.popBackStack()
+                            navigateBackOrToLanding()
                         }
                     }
                 }
@@ -2502,6 +2556,16 @@ private fun LocalNavigationRail(
     context: android.content.Context,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
 ) {
+    val navigateToTopLevel: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     // Calculate rail height based on number of items (5 items * 64dp + padding)
     val railHeight = (5 * 64 + 32).dp // Increased padding from 24 to 32
     
@@ -2534,12 +2598,7 @@ private fun LocalNavigationRail(
                     selectedIcon = RhythmIcons.HomeFilled,
                     unselectedIcon = RhythmIcons.Home,
                     onClick = {
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo(Screen.Home.route) {
-                                inclusive = true
-                            }
-                            launchSingleTop = true
-                        }
+                        navigateToTopLevel(Screen.Home.route)
                     }
                 ),
                 LocalNavRailItem(
@@ -2548,10 +2607,7 @@ private fun LocalNavigationRail(
                     selectedIcon = Icons.Filled.LibraryMusic,
                     unselectedIcon = RhythmIcons.Library,
                     onClick = {
-                        navController.navigate(libraryRoute) {
-                            popUpTo(Screen.Home.route)
-                            launchSingleTop = true
-                        }
+                        navigateToTopLevel(libraryRoute)
                     }
                 ),
                 LocalNavRailItem(
@@ -2560,7 +2616,7 @@ private fun LocalNavigationRail(
                     selectedIcon = Icons.Filled.AutoGraph,
                     unselectedIcon = Icons.Outlined.AutoGraph,
                     onClick = {
-                        navController.navigate(Screen.ListeningStats.route)
+                        navigateToTopLevel(Screen.ListeningStats.route)
                     }
                 ),
                 LocalNavRailItem(
@@ -2569,7 +2625,7 @@ private fun LocalNavigationRail(
                     selectedIcon = Icons.Filled.Search,
                     unselectedIcon = Icons.Outlined.Search,
                     onClick = {
-                        navController.navigate(Screen.Search.route)
+                        navigateToTopLevel(Screen.Search.route)
                     }
                 ),
                 LocalNavRailItem(
@@ -2578,7 +2634,7 @@ private fun LocalNavigationRail(
                     selectedIcon = Icons.Filled.Settings,
                     unselectedIcon = Icons.Outlined.Settings,
                     onClick = {
-                        navController.navigate(Screen.Settings.route)
+                        navigateToTopLevel(Screen.Settings.route)
                     }
                 )
             )
@@ -2588,7 +2644,7 @@ private fun LocalNavigationRail(
                     item = item,
                     isSelected = when (item.title) {
                         "Home" -> currentRoute == Screen.Home.route
-                        "Library" -> currentRoute.startsWith("library")
+                        "Library" -> currentRoute.substringBefore("?") == Screen.Library.route.substringBefore("?")
                         "Search" -> currentRoute == Screen.Search.route
                         "Settings" -> currentRoute.contains("settings")
                         "Stats" -> currentRoute == Screen.ListeningStats.route

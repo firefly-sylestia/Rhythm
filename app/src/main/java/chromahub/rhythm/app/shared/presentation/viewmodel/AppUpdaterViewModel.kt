@@ -1,11 +1,17 @@
 package chromahub.rhythm.app.shared.presentation.viewmodel
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.core.app.NotificationCompat
+import chromahub.rhythm.app.R
+import chromahub.rhythm.app.activities.MainActivity
 import chromahub.rhythm.app.network.GitHubRelease
 import chromahub.rhythm.app.network.NetworkManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,6 +122,9 @@ data class DownloadState(
  */
 class AppUpdaterViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "AppUpdaterViewModel"
+    private val UPDATE_DOWNLOAD_CHANNEL_ID = "update_download_progress"
+    private val UPDATE_DOWNLOAD_NOTIFICATION_ID = 1401
+    private val UPDATE_DOWNLOAD_COMPLETION_AUTO_DISMISS_MS = 7000L
     
     // GitHub repository information
     private val GITHUB_OWNER = "cromaguy"
@@ -141,9 +150,13 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
     // Active download state
     private var activeDownload: DownloadState? = null
     private var activeCall: Call? = null
+    private var lastNotifiedProgressPercent: Int = -1
+    private var completionNotificationDismissJob: kotlinx.coroutines.Job? = null
     
     // Mutex to prevent concurrent downloads
     private val downloadMutex = Mutex()
+
+    private val notificationManager = application.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     
     // Maximum retry attempts for downloads
     private val MAX_RETRY_ATTEMPTS = 3
@@ -204,6 +217,8 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
     val downloadState: StateFlow<DownloadState?> = _downloadState.asStateFlow()
 
     init {
+        ensureDownloadNotificationChannel()
+
         // Load any persisted download state
         loadDownloadState()
         
@@ -806,6 +821,8 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
         }
         
         _isDownloading.value = true
+        lastNotifiedProgressPercent = -1
+        showDownloadProgressNotification(0)
         
         // Use viewModelScope with IO dispatcher for background work
         // The download continues in background even if user navigates away
@@ -989,6 +1006,7 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
                                     val progress = (totalBytesRead.toFloat() / totalBytes.toFloat()) * 100f
                                     viewModelScope.launch {
                                         _downloadProgress.value = progress.coerceIn(0f, 100f)
+                                        maybeUpdateDownloadProgressNotification(_downloadProgress.value)
                                         activeDownload = activeDownload?.copy(downloadedBytes = totalBytesRead)
                                         _downloadState.value = activeDownload
                                         
@@ -1046,6 +1064,7 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
                                     _isDownloading.value = false
                                     _downloadProgress.value = 100f
                                     _downloadedFile.value = file
+                                    showDownloadCompletedNotification(file.name)
                                     // Calculate and store final checksum
                                     val finalChecksum = calculateFileChecksum(file)
                                     activeDownload = activeDownload?.copy(checksum = finalChecksum)
@@ -1075,6 +1094,7 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
                 activeDownload = null
                 activeCall = null
                 _downloadState.value = null
+                cancelDownloadNotification()
             }
         }
     }
@@ -1112,6 +1132,7 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
             activeDownload = null
             _downloadState.value = null
             clearDownloadState()
+            cancelDownloadNotification()
         }
     }
     
@@ -1269,6 +1290,7 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
         _downloadState.value = null
         _downloadProgress.value = 0f
         clearDownloadState()
+        cancelDownloadNotification()
     }
     
     /**
@@ -1287,6 +1309,7 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
         
         // Clear persisted state
         clearDownloadState()
+        cancelDownloadNotification()
     }
     
     /**
@@ -1352,5 +1375,110 @@ class AppUpdaterViewModel(application: Application) : AndroidViewModel(applicati
         // Note: Active downloads will be cancelled when ViewModel is cleared
         // Download state is persisted and can be resumed later
         cancelDownload()
+    }
+
+    private fun ensureDownloadNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val context = getApplication<Application>()
+
+        val channel = NotificationChannel(
+            UPDATE_DOWNLOAD_CHANNEL_ID,
+            context.getString(R.string.notification_updater_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = context.getString(R.string.notification_updater_channel_desc)
+            setShowBadge(false)
+            enableVibration(false)
+        }
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    private fun maybeUpdateDownloadProgressNotification(progress: Float) {
+        val progressPercent = progress.toInt().coerceIn(0, 100)
+        if (progressPercent == lastNotifiedProgressPercent) {
+            return
+        }
+        lastNotifiedProgressPercent = progressPercent
+        showDownloadProgressNotification(progressPercent)
+    }
+
+    private fun showDownloadProgressNotification(progressPercent: Int) {
+        val context = getApplication<Application>()
+        val openUpdatesIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("navigate_to", "updates")
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            4201,
+            openUpdatesIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val contentText = context.getString(R.string.notification_updater_downloading, progressPercent)
+        val notification = NotificationCompat.Builder(context, UPDATE_DOWNLOAD_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(context.getString(R.string.notification_updater_title))
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setProgress(100, progressPercent, false)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(UPDATE_DOWNLOAD_NOTIFICATION_ID, notification)
+    }
+
+    private fun showDownloadCompletedNotification(@Suppress("UNUSED_PARAMETER") fileName: String) {
+        val context = getApplication<Application>()
+        val openUpdatesIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("navigate_to", "updates")
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            4202,
+            openUpdatesIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val contentText = context.getString(R.string.notification_updater_download_complete)
+        val notification = NotificationCompat.Builder(context, UPDATE_DOWNLOAD_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(context.getString(R.string.notification_updater_title))
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(true)
+            .setOngoing(false)
+            .setProgress(0, 0, false)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(UPDATE_DOWNLOAD_NOTIFICATION_ID, notification)
+
+        completionNotificationDismissJob?.cancel()
+        completionNotificationDismissJob = viewModelScope.launch {
+            delay(UPDATE_DOWNLOAD_COMPLETION_AUTO_DISMISS_MS)
+            notificationManager.cancel(UPDATE_DOWNLOAD_NOTIFICATION_ID)
+            completionNotificationDismissJob = null
+        }
+    }
+
+    private fun cancelDownloadNotification() {
+        completionNotificationDismissJob?.cancel()
+        completionNotificationDismissJob = null
+        notificationManager.cancel(UPDATE_DOWNLOAD_NOTIFICATION_ID)
+        lastNotifiedProgressPercent = -1
     }
 }

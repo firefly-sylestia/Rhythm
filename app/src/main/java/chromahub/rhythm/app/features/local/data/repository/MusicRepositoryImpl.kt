@@ -59,6 +59,7 @@ import chromahub.rhythm.app.util.EnhancedLyricLine
 import chromahub.rhythm.app.util.EnhancedWord
 // AppleMusicLyricsParser import removed - kept for future re-implementation
 import android.content.SharedPreferences
+import androidx.room.withTransaction
 import chromahub.rhythm.app.features.local.data.database.RhythmDatabase
 import chromahub.rhythm.app.features.local.data.database.entity.ArtistEntity
 import chromahub.rhythm.app.features.local.data.database.entity.SongEntity
@@ -195,15 +196,20 @@ class MusicRepository(context: Context) {
             
             val songsWithMetadata = songs.count { it.bitrate != null && it.sampleRate != null && it.channels != null && it.codec != null }
             Log.d(TAG, "Saving ${songs.size} songs to Room (${songsWithMetadata} with metadata, clearArtistCache=$clearArtistCache)")
-            
-            songDao.replaceAll(entities)
 
-            // Save song-artist relationships for both grouping modes
-            saveSongArtistRelationships(songs)
+            val relationshipSets = buildSongArtistRelationshipSets(songs)
+            roomDb.withTransaction {
+                songDao.replaceAll(entities)
+                roomDb.songArtistDao().replaceAll(relationshipSets.albumArtistRelationships, true)
+                roomDb.songArtistDao().replaceAll(relationshipSets.trackArtistRelationships, false)
+
+                if (clearArtistCache) {
+                    // Clear artist cache since songs have changed
+                    roomDb.artistDao().deleteAll()
+                }
+            }
 
             if (clearArtistCache) {
-                // Clear artist cache since songs have changed
-                roomDb.artistDao().deleteAll()
                 Log.d(TAG, "Saved ${songs.size} songs to Room database and cleared artist cache")
             } else {
                 Log.d(TAG, "Saved ${songs.size} songs to Room database (kept artist cache)")
@@ -218,48 +224,66 @@ class MusicRepository(context: Context) {
      */
     private suspend fun saveSongArtistRelationships(songs: List<Song>) = withContext(Dispatchers.IO) {
         try {
-            val relationships = mutableListOf<SongArtistEntity>()
-
-            // Read artist separator settings once
-            val appSettings = AppSettings.getInstance(context)
-            val artistSeparatorEnabled = appSettings.artistSeparatorEnabled.value
-            val preloadedCharDelimiters: List<String> = if (artistSeparatorEnabled) {
-                appSettings.artistSeparatorDelimiters.value.toList().map { it.toString() }
-            } else {
-                emptyList()
+            val relationshipSets = buildSongArtistRelationshipSets(songs)
+            roomDb.withTransaction {
+                roomDb.songArtistDao().replaceAll(relationshipSets.albumArtistRelationships, true)
+                roomDb.songArtistDao().replaceAll(relationshipSets.trackArtistRelationships, false)
             }
 
-            for (song in songs) {
-                // For groupByAlbumArtist = true
-                val explicitAlbumArtist = song.albumArtist?.trim().orEmpty()
-                val albumArtistNames = if (explicitAlbumArtist.isNotBlank() && !explicitAlbumArtist.equals("<unknown>", ignoreCase = true)) {
-                    splitArtistNames(explicitAlbumArtist, preloadedCharDelimiters)
-                } else {
-                    splitArtistNames(song.artist, preloadedCharDelimiters)
-                }
-                for (artistName in albumArtistNames) {
-                    val cleanName = artistName.trim()
-                    if (cleanName.isNotBlank() && !cleanName.equals("<unknown>", ignoreCase = true)) {
-                        relationships.add(SongArtistEntity(song.id, cleanName, true))
-                    }
-                }
-
-                // For groupByAlbumArtist = false (split track artists)
-                val trackArtistNames = splitArtistNames(song.artist, preloadedCharDelimiters)
-                for (artistName in trackArtistNames) {
-                    val cleanName = artistName.trim()
-                    if (cleanName.isNotBlank() && cleanName != "<unknown>") {
-                        relationships.add(SongArtistEntity(song.id, cleanName, false))
-                    }
-                }
-            }
-
-            roomDb.songArtistDao().replaceAll(relationships, true)
-            roomDb.songArtistDao().replaceAll(relationships, false)
-            Log.d(TAG, "Saved ${relationships.size} song-artist relationships")
+            val totalRelationships = relationshipSets.albumArtistRelationships.size + relationshipSets.trackArtistRelationships.size
+            Log.d(TAG, "Saved $totalRelationships song-artist relationships")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save song-artist relationships", e)
         }
+    }
+
+    private data class SongArtistRelationshipSets(
+        val albumArtistRelationships: List<SongArtistEntity>,
+        val trackArtistRelationships: List<SongArtistEntity>
+    )
+
+    private fun buildSongArtistRelationshipSets(songs: List<Song>): SongArtistRelationshipSets {
+        val albumArtistRelationships = mutableListOf<SongArtistEntity>()
+        val trackArtistRelationships = mutableListOf<SongArtistEntity>()
+
+        // Read artist separator settings once
+        val appSettings = AppSettings.getInstance(context)
+        val artistSeparatorEnabled = appSettings.artistSeparatorEnabled.value
+        val preloadedCharDelimiters: List<String> = if (artistSeparatorEnabled) {
+            appSettings.artistSeparatorDelimiters.value.toList().map { it.toString() }
+        } else {
+            emptyList()
+        }
+
+        for (song in songs) {
+            // For groupByAlbumArtist = true
+            val explicitAlbumArtist = song.albumArtist?.trim().orEmpty()
+            val albumArtistNames = if (explicitAlbumArtist.isNotBlank() && !explicitAlbumArtist.equals("<unknown>", ignoreCase = true)) {
+                splitArtistNames(explicitAlbumArtist, preloadedCharDelimiters)
+            } else {
+                splitArtistNames(song.artist, preloadedCharDelimiters)
+            }
+            for (artistName in albumArtistNames) {
+                val cleanName = artistName.trim()
+                if (cleanName.isNotBlank() && !cleanName.equals("<unknown>", ignoreCase = true)) {
+                    albumArtistRelationships.add(SongArtistEntity(song.id, cleanName, true))
+                }
+            }
+
+            // For groupByAlbumArtist = false (split track artists)
+            val trackArtistNames = splitArtistNames(song.artist, preloadedCharDelimiters)
+            for (artistName in trackArtistNames) {
+                val cleanName = artistName.trim()
+                if (cleanName.isNotBlank() && !cleanName.equals("<unknown>", ignoreCase = true)) {
+                    trackArtistRelationships.add(SongArtistEntity(song.id, cleanName, false))
+                }
+            }
+        }
+
+        return SongArtistRelationshipSets(
+            albumArtistRelationships = albumArtistRelationships,
+            trackArtistRelationships = trackArtistRelationships
+        )
     }
     
     private suspend fun loadSongsFromRoom(): List<Song>? {
@@ -515,8 +539,9 @@ class MusicRepository(context: Context) {
             }
         }.toTypedArray()
 
-        // Improved selection to filter out very short files and invalid entries
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1 AND ${MediaStore.Audio.Media.DURATION} > 10000"
+        // Include entries tagged as music or generic audio MIME types.
+        // Some OTG/USB indexed tracks are not marked with IS_MUSIC=1.
+        val selection = "(${MediaStore.Audio.Media.IS_MUSIC} = 1 OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%') AND ${MediaStore.Audio.Media.DURATION} > 10000"
         val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
 
         try {
@@ -760,8 +785,8 @@ class MusicRepository(context: Context) {
             }
         }.toTypedArray()
 
-        // Only scan songs added after last scan
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1 AND ${MediaStore.Audio.Media.DURATION} > 10000 AND ${MediaStore.Audio.Media.DATE_ADDED} > ?"
+        // Only scan songs added after last scan. Keep OTG/USB compatibility by accepting audio MIME entries.
+        val selection = "(${MediaStore.Audio.Media.IS_MUSIC} = 1 OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%') AND ${MediaStore.Audio.Media.DURATION} > 10000 AND ${MediaStore.Audio.Media.DATE_ADDED} > ?"
         val selectionArgs = arrayOf((lastScanTimestamp / 1000).toString())
         val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
 
@@ -1623,8 +1648,12 @@ class MusicRepository(context: Context) {
         }
 
         val songs = loadSongs()
-        saveSongArtistRelationships(songs)
-        roomDb.artistDao().deleteAll()
+        val relationshipSets = buildSongArtistRelationshipSets(songs)
+        roomDb.withTransaction {
+            roomDb.songArtistDao().replaceAll(relationshipSets.albumArtistRelationships, true)
+            roomDb.songArtistDao().replaceAll(relationshipSets.trackArtistRelationships, false)
+            roomDb.artistDao().deleteAll()
+        }
         cachedArtistSplitConfig = configKey
 
         Log.d(

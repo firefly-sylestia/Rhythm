@@ -255,10 +255,11 @@ class MainActivity : ComponentActivity() {
 
                         if (shouldHandleStartupIntent) {
                             // Small delay to ensure view models are ready, then handle intent
-                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                            val startupIntentJob = lifecycleScope.launch {
                                 kotlinx.coroutines.delay(500)
                                 handleIntent(startupIntent)
                             }
+                            lifecycleScopeJobs.add(startupIntentJob)
                         }
                     }
                     
@@ -543,12 +544,15 @@ class MainActivity : ComponentActivity() {
     
     private suspend fun waitForServiceConnection(timeoutMs: Long): Boolean {
         val startTime = System.currentTimeMillis()
+        var lastConnectAttemptMs = 0L
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             if (musicViewModel.isServiceConnected()) {
                 return true
             }
-            if (!musicViewModel.isServiceConnected()) {
+            val now = System.currentTimeMillis()
+            if (!musicViewModel.isServiceConnected() && now - lastConnectAttemptMs >= 1000L) {
                 musicViewModel.connectToMediaService()
+                lastConnectAttemptMs = now
             }
             delay(100)
         }

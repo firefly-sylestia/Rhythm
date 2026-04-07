@@ -509,6 +509,25 @@ fun SongInfoBottomSheet(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+
+                                    val tabletDiscNumber = (extendedInfo?.discNumber ?: 0)
+                                        .takeIf { it > 0 }
+                                        ?: song.discNumber.takeIf { it > 0 }
+                                    val tabletSongDescriptor = buildList {
+                                        tabletDiscNumber?.let { add("Disc $it") }
+                                        if (song.trackNumber > 0) add("Track ${song.trackNumber}")
+                                    }.joinToString(" • ")
+
+                                    if (tabletSongDescriptor.isNotEmpty()) {
+                                        Text(
+                                            text = tabletSongDescriptor,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -756,6 +775,25 @@ fun SongInfoBottomSheet(
                                 gradientEdgeColor = MaterialTheme.colorScheme.surface,
                                 modifier = Modifier.fillMaxWidth()
                             )
+
+                            val phoneDiscNumber = (extendedInfo?.discNumber ?: 0)
+                                .takeIf { it > 0 }
+                                ?: displaySong.discNumber.takeIf { it > 0 }
+                            val phoneSongDescriptor = buildList {
+                                phoneDiscNumber?.let { add("Disc $it") }
+                                if (displaySong.trackNumber > 0) add("Track ${displaySong.trackNumber}")
+                            }.joinToString(" • ")
+
+                            if (phoneSongDescriptor.isNotEmpty()) {
+                                Text(
+                                    text = phoneSongDescriptor,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                         
                         // No edit button here - moved to actions section
@@ -1166,10 +1204,14 @@ private fun SongInfoCard(
 
         // Track info (prefer extended info if available)
         val trackNum = if (song.trackNumber > 0) song.trackNumber else 0
-        val discNum = extendedInfo?.discNumber ?: 0
-        when {
-            trackNum > 0 && discNum > 0 -> add(MetadataItem("Track", "$discNum.$trackNum", Icons.Rounded.FormatListNumbered))
-            trackNum > 0 -> add(MetadataItem("Track", trackNum.toString(), Icons.Rounded.FormatListNumbered))
+        val discNum = (extendedInfo?.discNumber ?: 0).takeIf { it > 0 }
+            ?: song.discNumber.takeIf { it > 0 }
+            ?: 0
+        if (discNum > 0) {
+            add(MetadataItem("Disc", discNum.toString(), Icons.Rounded.Album))
+        }
+        if (trackNum > 0) {
+            add(MetadataItem("Track", trackNum.toString(), Icons.Rounded.FormatListNumbered))
         }
 
         // Year (prefer song data, fallback to extended info)

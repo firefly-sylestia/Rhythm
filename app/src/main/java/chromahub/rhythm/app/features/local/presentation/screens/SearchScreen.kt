@@ -418,9 +418,7 @@ fun SearchScreen(
         }
     }
 
-    BackHandler(
-        enabled = showAllSongsPage || searchQuery.isNotEmpty() || showFilterOptions || isSearchActive
-    ) {
+    BackHandler(enabled = true) {
         handleSearchBack()
     }
 

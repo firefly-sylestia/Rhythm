@@ -8,6 +8,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -16,6 +18,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
 import chromahub.rhythm.app.ui.theme.RhythmTheme
@@ -73,26 +76,34 @@ class CrashActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
 
         // Responsive sizing
-        val isTablet = false // For crash activity, assume phone layout
+        val configuration = LocalConfiguration.current
+        val isTablet = configuration.screenWidthDp >= 600
         val contentMaxWidth = 600.dp
         val cardPadding = if (isTablet) 32.dp else 28.dp
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface)
-                .let { if (isTablet) it.width(contentMaxWidth) else it },
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(
+                    horizontal = if (isTablet) 24.dp else 0.dp,
+                    vertical = if (isTablet) 24.dp else 0.dp
+                ),
+            contentAlignment = if (isTablet) Alignment.Center else Alignment.TopCenter
         ) {
             // Crash card container
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 shape = MaterialTheme.shapes.extraLarge,
                 tonalElevation = if (isTablet) 4.dp else 2.dp,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .let { if (isTablet) it.width(contentMaxWidth) else it }
+                modifier = if (isTablet) {
+                    Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = contentMaxWidth)
+                } else {
+                    Modifier.fillMaxSize()
+                }
+                    .then(if (isTablet) Modifier else Modifier.fillMaxHeight())
                     .animateContentSize(
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -101,12 +112,15 @@ class CrashActivity : ComponentActivity() {
                     )
             ) {
                 Column(
-                    modifier = Modifier.padding(
-                        start = cardPadding,
-                        end = cardPadding,
-                        top = cardPadding * 2,
-                        bottom = cardPadding
-                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(
+                            start = cardPadding,
+                            end = cardPadding,
+                            top = cardPadding * 2,
+                            bottom = cardPadding
+                        ),
                     horizontalAlignment = Alignment.Start,
                     verticalArrangement = Arrangement.Center
                 ) {

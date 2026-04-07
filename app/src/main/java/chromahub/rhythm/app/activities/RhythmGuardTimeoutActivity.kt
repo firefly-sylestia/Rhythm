@@ -21,6 +21,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,15 +30,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import chromahub.rhythm.app.R
 import chromahub.rhythm.app.shared.data.model.AppSettings
+import chromahub.rhythm.app.shared.presentation.components.common.RhythmWavyProgressLoader
 import chromahub.rhythm.app.ui.theme.RhythmTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -187,26 +192,34 @@ private fun RhythmGuardTimeoutScreen(
     BackHandler(enabled = true) {}
 
     // Responsive sizing
-    val isTablet = false // For timeout activity, assume phone layout
+    val configuration = LocalConfiguration.current
+    val isTablet = configuration.screenWidthDp >= 600
     val contentMaxWidth = 600.dp
     val cardPadding = if (isTablet) 32.dp else 28.dp
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
-            .let { if (isTablet) it.width(contentMaxWidth) else it },
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(
+                horizontal = if (isTablet) 24.dp else 0.dp,
+                vertical = if (isTablet) 24.dp else 0.dp
+            ),
+        contentAlignment = if (isTablet) Alignment.Center else Alignment.TopCenter
     ) {
         // Timeout card container
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = MaterialTheme.shapes.extraLarge,
             tonalElevation = if (isTablet) 4.dp else 2.dp,
-            modifier = Modifier
-                .fillMaxSize()
-                .let { if (isTablet) it.width(contentMaxWidth) else it }
+            modifier = if (isTablet) {
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = contentMaxWidth)
+            } else {
+                Modifier.fillMaxSize()
+            }
+                .then(if (isTablet) Modifier else Modifier.fillMaxHeight())
                 .animateContentSize(
                     animationSpec = spring(
                         dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -215,12 +228,15 @@ private fun RhythmGuardTimeoutScreen(
                 )
         ) {
             Column(
-                modifier = Modifier.padding(
-                    start = cardPadding,
-                    end = cardPadding,
-                    top = cardPadding * 2,
-                    bottom = cardPadding
-                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(
+                        start = cardPadding,
+                        end = cardPadding,
+                        top = cardPadding * 2,
+                        bottom = cardPadding
+                    ),
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -302,30 +318,30 @@ private fun RhythmGuardTimeoutScreen(
                             modifier = Modifier.size(176.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularWavyProgressIndicator(
-                                progress = { progress },
+                            RhythmWavyProgressLoader(
+                                progress = progress,
                                 modifier = Modifier.fillMaxSize(),
-                                color = MaterialTheme.colorScheme.primary,
+                                indicatorColor = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                            )
-
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Filled.AccessTime,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = formatCountdown(remainingSeconds),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.AccessTime,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = formatCountdown(remainingSeconds),
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }

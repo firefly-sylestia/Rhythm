@@ -17,7 +17,7 @@ import chromahub.rhythm.app.shared.data.model.AppSettings
 import chromahub.rhythm.app.network.NetworkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import retrofit2.Response
+import java.util.concurrent.TimeUnit
 
 /**
  * Background worker that checks for app updates using smart polling techniques
@@ -73,10 +73,17 @@ class UpdateNotificationWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(context, workerParams) {
 
+    private enum class UpdateCheckResult {
+        UPDATE_AVAILABLE,
+        UP_TO_DATE,
+        ERROR
+    }
+
     companion object {
         const val TAG = "UpdateNotificationWorker"
         const val WORK_NAME = "update_notification_work"
-        const val CHANNEL_ID = "app_updates"
+        private const val UPDATE_AVAILABLE_CHANNEL_ID = "app_updates"
+        private const val UPDATE_STATUS_CHANNEL_ID = "app_update_status"
         const val NOTIFICATION_ID = 1001
         
         // Metadata keys for SharedPreferences
@@ -86,6 +93,11 @@ class UpdateNotificationWorker(
         private const val KEY_LAST_VERSION_TAG = "last_version_tag"
         private const val KEY_LAST_CHECK_TIME = "last_check_time"
         private const val KEY_CONSECUTIVE_NOT_MODIFIED = "consecutive_not_modified"
+        private const val KEY_LAST_STATUS_NOTIFICATION_AT = "last_status_notification_at"
+        private const val KEY_LAST_STATUS_NOTIFICATION_TYPE = "last_status_notification_type"
+
+        private const val STATUS_TYPE_UP_TO_DATE = "up_to_date"
+        private const val STATUS_TYPE_ERROR = "error"
         
         // Exponential backoff thresholds
         private const val MAX_CONSECUTIVE_NOT_MODIFIED = 10
@@ -94,6 +106,7 @@ class UpdateNotificationWorker(
     private val appSettings = AppSettings.getInstance(applicationContext)
     private val gitHubApiService = NetworkManager.createGitHubApiService()
     private val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    private var lastCheckErrorMessage: String? = null
     
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         return@withContext try {
@@ -104,37 +117,71 @@ class UpdateNotificationWorker(
                 Log.d(TAG, "Updates disabled, skipping check")
                 return@withContext Result.success()
             }
+
+            if (!appSettings.autoCheckForUpdates.value) {
+                Log.d(TAG, "Auto-check for updates disabled, skipping background check")
+                return@withContext Result.success()
+            }
             
-            // Check if notifications are enabled
-            if (!appSettings.updateNotificationsEnabled.value) {
-                Log.d(TAG, "Update notifications disabled, skipping check")
+            val updateAvailabilityNotificationsEnabled = appSettings.updateNotificationsEnabled.value
+            val updateStatusNotificationsEnabled = appSettings.updateStatusNotificationsEnabled.value
+            if (!updateAvailabilityNotificationsEnabled && !updateStatusNotificationsEnabled) {
+                Log.d(TAG, "All update notifications disabled, skipping check")
                 return@withContext Result.success()
             }
             
             val currentChannel = appSettings.updateChannel.value
             
             // Perform smart polling check
-            val updateDetected = checkForUpdateWithSmartPolling(currentChannel)
-            
-            if (updateDetected) {
-                Log.d(TAG, "New update detected! Sending notification...")
-                sendUpdateNotification()
-            } else {
-                Log.d(TAG, "No new updates detected")
+            when (checkForUpdateWithSmartPolling(currentChannel)) {
+                UpdateCheckResult.UPDATE_AVAILABLE -> {
+                    if (updateAvailabilityNotificationsEnabled) {
+                        Log.d(TAG, "New update detected! Sending notification...")
+                        sendUpdateNotification()
+                    } else {
+                        Log.d(TAG, "Update available, but update-available notifications are disabled")
+                    }
+                }
+
+                UpdateCheckResult.UP_TO_DATE -> {
+                    Log.d(TAG, "No new updates detected")
+                    maybeNotifyUpdateStatus(
+                        type = STATUS_TYPE_UP_TO_DATE,
+                        title = applicationContext.getString(R.string.updates_up_to_date),
+                        text = applicationContext.getString(R.string.updates_up_to_date_message)
+                    )
+                }
+
+                UpdateCheckResult.ERROR -> {
+                    val message = lastCheckErrorMessage
+                        ?: applicationContext.getString(R.string.updates_unknown_error)
+                    Log.w(TAG, "Update check completed with error state: $message")
+                    maybeNotifyUpdateStatus(
+                        type = STATUS_TYPE_ERROR,
+                        title = applicationContext.getString(R.string.updates_check_failed),
+                        text = message
+                    )
+                }
             }
             
             Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Update check failed: ${e.message}", e)
+            maybeNotifyUpdateStatus(
+                type = STATUS_TYPE_ERROR,
+                title = applicationContext.getString(R.string.updates_check_failed),
+                text = e.message ?: applicationContext.getString(R.string.updates_unknown_error)
+            )
             Result.retry()
         }
     }
     
     /**
-     * Smart polling using HTTP conditional requests to minimize API calls
-     * Returns true if a new update is detected
+     * Smart polling using HTTP conditional requests to minimize API calls.
      */
-    private suspend fun checkForUpdateWithSmartPolling(channel: String): Boolean {
+    private suspend fun checkForUpdateWithSmartPolling(channel: String): UpdateCheckResult {
+        lastCheckErrorMessage = null
+
         try {
             val lastETag = prefs.getString(KEY_LAST_ETAG, null)
             val lastModified = prefs.getString(KEY_LAST_MODIFIED, null)
@@ -143,11 +190,6 @@ class UpdateNotificationWorker(
             
             Log.d(TAG, "Smart polling - Last ETag: $lastETag, Last Modified: $lastModified")
             Log.d(TAG, "Consecutive 304 responses: $consecutiveNotModified")
-            
-            // Build headers for conditional request
-            val headers = mutableMapOf<String, String>()
-            lastETag?.let { headers["If-None-Match"] = it }
-            lastModified?.let { headers["If-Modified-Since"] = it }
             
             // Fetch latest release based on channel with conditional headers
             val response = if (channel == "beta") {
@@ -185,7 +227,7 @@ class UpdateNotificationWorker(
                         .putInt(KEY_CONSECUTIVE_NOT_MODIFIED, consecutiveNotModified + 1)
                         .putLong(KEY_LAST_CHECK_TIME, System.currentTimeMillis())
                         .apply()
-                    return false
+                    return UpdateCheckResult.UP_TO_DATE
                 }
                 
                 200 -> {
@@ -216,28 +258,72 @@ class UpdateNotificationWorker(
                                 .putInt(KEY_CONSECUTIVE_NOT_MODIFIED, 0) // Reset counter
                                 .apply()
                             
-                            return hasNewVersion
+                            return if (hasNewVersion) {
+                                UpdateCheckResult.UPDATE_AVAILABLE
+                            } else {
+                                UpdateCheckResult.UP_TO_DATE
+                            }
                         }
+
+                        lastCheckErrorMessage = "GitHub returned an empty release payload"
+                        return UpdateCheckResult.ERROR
                     }
+
+                    lastCheckErrorMessage = "GitHub returned an unsuccessful response"
+                    return UpdateCheckResult.ERROR
                 }
                 
                 403 -> {
                     // Rate limit exceeded
                     Log.w(TAG, "GitHub API rate limit exceeded. Next reset: $rateLimitReset")
-                    // Don't retry immediately
-                    return false
+                    lastCheckErrorMessage = "GitHub rate limit reached. Try again later."
+                    return UpdateCheckResult.ERROR
                 }
                 
                 else -> {
                     Log.w(TAG, "Unexpected response code: $responseCode")
+                    lastCheckErrorMessage = "Update check failed with HTTP $responseCode"
+                    return UpdateCheckResult.ERROR
                 }
             }
-            
-            return false
         } catch (e: Exception) {
             Log.e(TAG, "Error during smart polling: ${e.message}", e)
-            return false
+            lastCheckErrorMessage = e.message ?: "Unknown network error"
+            return UpdateCheckResult.ERROR
         }
+    }
+
+    private fun maybeNotifyUpdateStatus(type: String, title: String, text: String) {
+        if (!appSettings.updateStatusNotificationsEnabled.value) {
+            return
+        }
+
+        if (!shouldSendStatusNotification(type)) {
+            return
+        }
+
+        sendUpdateStatusNotification(title, text)
+        prefs.edit()
+            .putString(KEY_LAST_STATUS_NOTIFICATION_TYPE, type)
+            .putLong(KEY_LAST_STATUS_NOTIFICATION_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun shouldSendStatusNotification(type: String): Boolean {
+        val lastType = prefs.getString(KEY_LAST_STATUS_NOTIFICATION_TYPE, null)
+        val lastSentAt = prefs.getLong(KEY_LAST_STATUS_NOTIFICATION_AT, 0L)
+        val now = System.currentTimeMillis()
+
+        if (lastType != type) {
+            return true
+        }
+
+        val minIntervalMs = when (type) {
+            STATUS_TYPE_ERROR -> TimeUnit.HOURS.toMillis(2)
+            else -> TimeUnit.HOURS.toMillis(12)
+        }
+
+        return now - lastSentAt >= minIntervalMs
     }
     
     /**
@@ -322,19 +408,8 @@ class UpdateNotificationWorker(
      */
     private fun sendUpdateNotification() {
         val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        
-        // Create notification channel for Android O and above
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "App Updates",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Notifications for new app version releases"
-                enableVibration(true)
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
+
+        ensureUpdateAvailableChannel(notificationManager)
         
         // Create intent to open app update screen
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
@@ -350,11 +425,14 @@ class UpdateNotificationWorker(
         )
         
         // Build notification
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(applicationContext, UPDATE_AVAILABLE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification) // Make sure this icon exists
-            .setContentTitle("Rhythm Update Available")
-            .setContentText("A new version of Rhythm is available. Tap to download.")
+            .setContentTitle(applicationContext.getString(R.string.notification_updater_available_title))
+            .setContentText(applicationContext.getString(R.string.notification_updater_available_text))
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .setVibrate(longArrayOf(0, 250, 250, 250))
@@ -362,6 +440,75 @@ class UpdateNotificationWorker(
         
         notificationManager.notify(NOTIFICATION_ID, notification)
         Log.d(TAG, "Update notification sent")
+    }
+
+    private fun sendUpdateStatusNotification(title: String, text: String) {
+        val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        ensureUpdateStatusChannel(notificationManager)
+
+        val intent = Intent(applicationContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("navigate_to", "updates")
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            applicationContext,
+            1,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val summaryText = if (text.startsWith(title)) {
+            text
+        } else {
+            "$title. $text"
+        }
+
+        val notification = NotificationCompat.Builder(applicationContext, UPDATE_STATUS_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(applicationContext.getString(R.string.notification_updater_title))
+            .setContentText(summaryText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(summaryText))
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID + 1, notification)
+        Log.d(TAG, "Update status notification sent: $title")
+    }
+
+    private fun ensureUpdateAvailableChannel(notificationManager: NotificationManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val channel = NotificationChannel(
+            UPDATE_AVAILABLE_CHANNEL_ID,
+            applicationContext.getString(R.string.service_app_updates),
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = applicationContext.getString(R.string.notification_updater_channel_desc)
+            enableVibration(true)
+        }
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    private fun ensureUpdateStatusChannel(notificationManager: NotificationManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val channel = NotificationChannel(
+            UPDATE_STATUS_CHANNEL_ID,
+            applicationContext.getString(R.string.service_update_status),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = applicationContext.getString(R.string.service_update_status_desc)
+            enableVibration(false)
+            setShowBadge(false)
+        }
+        notificationManager.createNotificationChannel(channel)
     }
     
     /**

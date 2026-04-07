@@ -40,7 +40,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -83,17 +82,17 @@ fun MediaScanLoader(
     onScanComplete: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val songs by musicViewModel.songs.collectAsState()
-    val albums by musicViewModel.albums.collectAsState()
-    val artists by musicViewModel.artists.collectAsState()
+    val songs by musicViewModel.filteredSongs.collectAsState()
+    val albums by musicViewModel.filteredAlbums.collectAsState()
+    val artists by musicViewModel.filteredArtists.collectAsState()
     val scanProgress by musicViewModel.scanProgress.collectAsState()
+    val songsFound = songs.size
+    val albumsFound = albums.size
+    val artistsFound = artists.size
     
     // Track scanning progress
     var displayProgress by remember { mutableStateOf(0f) }
     var currentStep by remember { mutableStateOf("Initializing...") }
-    var songsFound by remember { mutableIntStateOf(0) }
-    var albumsFound by remember { mutableIntStateOf(0) }
-    var artistsFound by remember { mutableIntStateOf(0) }
     var isComplete by remember { mutableStateOf(false) }
     
     // Breathing animation for the main loader
@@ -131,10 +130,6 @@ fun MediaScanLoader(
     
     // Update display based on real scan progress
     LaunchedEffect(scanProgress) {
-        songsFound = songs.size
-        albumsFound = albums.size
-        artistsFound = artists.size
-        
         // Use real scan progress from repository
         when (scanProgress.stage) {
             "Idle" -> {
@@ -198,9 +193,9 @@ fun MediaScanLoader(
     LaunchedEffect(Unit) {
         delay(90000) // 1.5 minutes maximum wait time (reduced from 2 minutes)
         if (!isComplete) {
-            Log.w("MediaScanLoader", "Media scan timeout reached. Completing with current state: songs=${songs.size}, albums=${albums.size}, artists=${artists.size}")
+            Log.w("MediaScanLoader", "Media scan timeout reached. Completing with current state: songs=$songsFound, albums=$albumsFound, artists=$artistsFound")
             displayProgress = 1.0f
-            currentStep = if (songs.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
+            currentStep = if (songsFound == 0 && albumsFound == 0 && artistsFound == 0) {
                 "No media files found - continuing..."
             } else {
                 "Media scan complete!"
