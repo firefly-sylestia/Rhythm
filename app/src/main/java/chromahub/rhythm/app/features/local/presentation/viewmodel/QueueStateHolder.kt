@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Manages the state of the playback queue, including original order preservation
- * for shuffle operations. Similar to PixelPlayer's QueueStateHolder.
+ * for shuffle operations.
  */
 class QueueStateHolder {
 

@@ -13,7 +13,7 @@ import chromahub.rhythm.app.features.local.data.database.entity.ArtistEntity
 import chromahub.rhythm.app.features.local.data.database.entity.SongArtistEntity
 import chromahub.rhythm.app.features.local.data.database.entity.SongEntity
 
-@Database(entities = [SongEntity::class, ArtistEntity::class, SongArtistEntity::class], version = 4, exportSchema = false)
+@Database(entities = [SongEntity::class, ArtistEntity::class, SongArtistEntity::class], version = 5, exportSchema = false)
 abstract class RhythmDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
     abstract fun artistDao(): ArtistDao
@@ -65,13 +65,22 @@ abstract class RhythmDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from version 4 to 5: Persist multi-disc ordering metadata.
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE songs ADD COLUMN discNumber INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         fun getInstance(context: Context): RhythmDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     RhythmDatabase::class.java,
                     "rhythm_database"
-                ).fallbackToDestructiveMigration()
+                )
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }
             }

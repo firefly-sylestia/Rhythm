@@ -17,7 +17,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -31,7 +30,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsets
@@ -39,7 +37,6 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -53,13 +50,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -299,12 +297,21 @@ private fun RhythmGuardWarningHost(
     var lastWarningVolumePercent by remember { mutableIntStateOf(-1) }
     var lastWarningExposureMinutes by remember { mutableIntStateOf(-1) }
     var breakResumeMinutes by remember(configuredBreakResumeMinutes) {
-        mutableIntStateOf(configuredBreakResumeMinutes)
+        mutableIntStateOf(configuredBreakResumeMinutes.coerceIn(1, 180))
+    }
+    var breakDelayMinutes by remember(warningTimeoutMinutes) {
+        mutableIntStateOf(warningTimeoutMinutes.coerceIn(1, 180))
     }
     var resumeCountdownSeconds by remember { mutableLongStateOf(0L) }
     var timeoutStartedAtMs by remember { mutableLongStateOf(0L) }
+    var lastTimeoutTriggeredExposureMinutes by remember { mutableIntStateOf(-1) }
     var lastAutoClampAtMs by remember { mutableLongStateOf(0L) }
     var lastAutoClampThresholdPercent by remember { mutableIntStateOf(-1) }
+    var pendingBreakStartAtMs by remember { mutableLongStateOf(0L) }
+    var pendingBreakStartCountdownSeconds by remember { mutableLongStateOf(0L) }
+    var pendingBreakDurationMinutes by remember {
+        mutableIntStateOf(configuredBreakResumeMinutes.coerceIn(1, 180))
+    }
     var isBubbleOnLeft by remember { mutableStateOf(false) }
     var rawDragXDp by remember { mutableFloatStateOf(0f) }
     var bubbleOffsetYDp by remember { mutableFloatStateOf(0f) }
@@ -314,6 +321,41 @@ private fun RhythmGuardWarningHost(
     }
     val formattedExposureLimit = remember(effectiveExposureLimitMinutes) {
         rhythmGuardFormatDurationFromMinutes(effectiveExposureLimitMinutes)
+    }
+
+    val startTimeoutBreak: (Int) -> Unit = { requestedMinutes ->
+        musicViewModel.pauseForRhythmGuardTimeout(reason = "manual break start")
+        val now = System.currentTimeMillis()
+        val safeBreakMinutes = requestedMinutes.coerceIn(1, 180)
+        val nextTimeoutUntil = now + safeBreakMinutes.toLong() * 60_000L
+
+        timeoutStartedAtMs = now
+        lastTimeoutTriggeredExposureMinutes = todayExposureMinutes
+        appSettings.setRhythmGuardListeningTimeout(
+            untilEpochMs = nextTimeoutUntil,
+            reason = context.getString(
+                R.string.settings_rhythm_guard_timeout_reason_manual,
+                formattedTodayExposure,
+                formattedExposureLimit
+            )
+        )
+        appSettings.setRhythmGuardBreakResumeMinutes(safeBreakMinutes)
+        breakResumeMinutes = safeBreakMinutes
+        pendingBreakStartAtMs = 0L
+        pendingBreakStartCountdownSeconds = 0L
+        breakDialogState = null
+    }
+
+    val delayBreakReminder: (Int) -> Unit = { requestedMinutes ->
+        val now = System.currentTimeMillis()
+        val safeDelayMinutes = requestedMinutes.coerceIn(1, 180)
+        val delayMs = safeDelayMinutes.toLong() * 60_000L
+
+        pendingBreakDurationMinutes = breakResumeMinutes.coerceIn(1, 180)
+        pendingBreakStartAtMs = now + delayMs
+        pendingBreakStartCountdownSeconds = (delayMs / 1000L).coerceAtLeast(0L)
+        breakDelayMinutes = safeDelayMinutes
+        breakDialogState = null
     }
 
     LaunchedEffect(dailyListeningStats, songsPlayed, listeningTime) {
@@ -333,14 +375,19 @@ private fun RhythmGuardWarningHost(
             appSettings.clearRhythmGuardListeningTimeout()
             resumeCountdownSeconds = 0L
             timeoutStartedAtMs = 0L
+            pendingBreakStartAtMs = 0L
+            pendingBreakStartCountdownSeconds = 0L
             lastWarningVolumePercent = -1
             lastWarningExposureMinutes = -1
+            lastTimeoutTriggeredExposureMinutes = -1
             lastAutoClampAtMs = 0L
             lastAutoClampThresholdPercent = -1
         }
         if (currentSong == null) {
             volumeDialogState = null
             breakDialogState = null
+            pendingBreakStartAtMs = 0L
+            pendingBreakStartCountdownSeconds = 0L
         }
         if (auraMode == AppSettings.RHYTHM_GUARD_MODE_MANUAL && !manualWarningsEnabled) {
             volumeDialogState = null
@@ -353,13 +400,16 @@ private fun RhythmGuardWarningHost(
         if (timeoutUntilMs <= now) {
             if (timeoutUntilMs > 0L) {
                 appSettings.clearRhythmGuardListeningTimeout()
+                musicViewModel.resumePlaybackAfterRhythmGuardTimeoutIfNeeded(
+                    source = "timeout effect immediate-expired"
+                )
             }
             resumeCountdownSeconds = 0L
             timeoutStartedAtMs = 0L
             return@LaunchedEffect
         }
 
-        musicViewModel.pauseMusic()
+        musicViewModel.pauseForRhythmGuardTimeout(reason = "timeout countdown active")
         if (timeoutStartedAtMs <= 0L || timeoutStartedAtMs >= timeoutUntilMs) {
             timeoutStartedAtMs = timeoutUntilMs - configuredBreakResumeMinutes.coerceIn(1, 180) * 60_000L
         }
@@ -375,12 +425,35 @@ private fun RhythmGuardWarningHost(
         val timeoutExpired = timeoutUntilMs <= System.currentTimeMillis()
         if (timeoutExpired) {
             appSettings.clearRhythmGuardListeningTimeout()
-            if (auraMode == AppSettings.RHYTHM_GUARD_MODE_AUTO) {
-                musicViewModel.resumeMusic()
-            }
+            musicViewModel.resumePlaybackAfterRhythmGuardTimeoutIfNeeded(
+                source = "timeout effect countdown-finished"
+            )
         }
         resumeCountdownSeconds = 0L
         timeoutStartedAtMs = 0L
+    }
+
+    LaunchedEffect(pendingBreakStartAtMs, pendingBreakDurationMinutes, timeoutUntilMs) {
+        if (pendingBreakStartAtMs <= 0L || timeoutUntilMs > System.currentTimeMillis()) {
+            pendingBreakStartCountdownSeconds = 0L
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            val now = System.currentTimeMillis()
+            val remainingSeconds = ((pendingBreakStartAtMs - now) / 1000L).coerceAtLeast(0L)
+            pendingBreakStartCountdownSeconds = remainingSeconds
+            if (remainingSeconds <= 0L) break
+            delay(1000L)
+        }
+
+        val shouldStartTimeout = pendingBreakStartAtMs > 0L && timeoutUntilMs <= System.currentTimeMillis()
+        pendingBreakStartAtMs = 0L
+        pendingBreakStartCountdownSeconds = 0L
+
+        if (shouldStartTimeout) {
+            startTimeoutBreak(pendingBreakDurationMinutes)
+        }
     }
 
     LaunchedEffect(auraMode, auraAge) {
@@ -469,7 +542,16 @@ private fun RhythmGuardWarningHost(
             RhythmGuardWarningType.VOLUME -> currentVolumePercent >= (lastWarningVolumePercent + 5)
             RhythmGuardWarningType.EXPOSURE -> todayExposureMinutes >= (lastWarningExposureMinutes + 15)
         }
-        val canShow = warningTypeChanged || cooldownElapsed || riskStepIncreased
+        val exposureGrowthSinceLastTimeout = if (lastTimeoutTriggeredExposureMinutes >= 0) {
+            todayExposureMinutes - lastTimeoutTriggeredExposureMinutes
+        } else {
+            Int.MAX_VALUE
+        }
+        val exposureCooldownEligible = cooldownElapsed && exposureGrowthSinceLastTimeout >= 10
+        val canShow = when (warningType) {
+            RhythmGuardWarningType.VOLUME -> warningTypeChanged || cooldownElapsed || riskStepIncreased
+            RhythmGuardWarningType.EXPOSURE -> warningTypeChanged || riskStepIncreased || exposureCooldownEligible
+        }
 
         if (canShow && volumeDialogState == null && breakDialogState == null) {
             when (warningType) {
@@ -498,9 +580,10 @@ private fun RhythmGuardWarningHost(
                             formattedExposureLimit
                         )
                         timeoutStartedAtMs = now
+                        lastTimeoutTriggeredExposureMinutes = todayExposureMinutes
                         appSettings.setRhythmGuardBreakResumeMinutes(safeBreakMinutes)
                         appSettings.setRhythmGuardListeningTimeout(timeoutEnd, reason)
-                        musicViewModel.pauseMusic()
+                        musicViewModel.pauseForRhythmGuardTimeout(reason = "auto break start")
                         RhythmGuardTimeoutActivity.start(
                             context = context,
                             reason = reason,
@@ -618,8 +701,17 @@ private fun RhythmGuardWarningHost(
 
     val breakState = breakDialogState
     if (breakState != null) {
+        var showBreakDurationPicker by remember { mutableStateOf(false) }
+        var showDelayDurationPicker by remember { mutableStateOf(false) }
+
+        val formattedBreakDuration = rhythmGuardFormatDurationFromMinutes(breakResumeMinutes.coerceIn(1, 180))
+
         AlertDialog(
-            onDismissRequest = { breakDialogState = null },
+            onDismissRequest = {
+                showBreakDurationPicker = false
+                showDelayDurationPicker = false
+                breakDialogState = null
+            },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             iconContentColor = MaterialTheme.colorScheme.secondary,
             titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -665,97 +757,136 @@ private fun RhythmGuardWarningHost(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.88f)
                     )
-                    Text(
-                        text = context.getString(R.string.settings_rhythm_guard_break_dialog_schedule_title),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
-                    )
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        )
                     ) {
-                        listOf(5, 10, 15, 30, 45, 60).forEach { option ->
-                            FilterChip(
-                                selected = breakResumeMinutes == option,
-                                onClick = { breakResumeMinutes = option },
-                                label = { Text(rhythmGuardFormatDurationFromMinutes(option)) }
-                            )
-                        }
-                    }
-                    FilledTonalButton(
-                        onClick = {
-                            musicViewModel.pauseMusic()
-                            val now = System.currentTimeMillis()
-                            val resumeDelayMs = breakResumeMinutes.toLong() * 60_000L
-                            timeoutStartedAtMs = now
-                            appSettings.setRhythmGuardListeningTimeout(
-                                untilEpochMs = now + resumeDelayMs,
-                                reason = context.getString(
-                                    R.string.settings_rhythm_guard_timeout_reason_manual,
-                                    formattedTodayExposure,
-                                    formattedExposureLimit
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = context.getString(R.string.settings_rhythm_guard_break_dialog_schedule_title),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
-                            )
-                            appSettings.setRhythmGuardBreakResumeMinutes(breakResumeMinutes)
-                            breakDialogState = null
+                                Text(
+                                    text = formattedBreakDuration,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                            OutlinedButton(onClick = { showBreakDurationPicker = true }) {
+                                Icon(
+                                    imageVector = Icons.Filled.AccessTime,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(context.getString(R.string.settings_rhythm_guard_break_dialog_pick_time))
+                            }
                         }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Schedule,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            context.getString(
-                                R.string.settings_rhythm_guard_break_dialog_schedule_action,
-                                rhythmGuardFormatDurationFromMinutes(breakResumeMinutes)
-                            )
-                        )
                     }
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        musicViewModel.pauseMusic()
-                        appSettings.clearRhythmGuardListeningTimeout()
-                        breakDialogState = null
-                    }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Pause,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(context.getString(R.string.settings_rhythm_guard_break_dialog_pause_only))
+                    Button(
+                        onClick = { startTimeoutBreak(breakResumeMinutes) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Pause,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(context.getString(R.string.settings_rhythm_guard_break_dialog_pause_only))
+                    }
+
+                    OutlinedButton(
+                        onClick = { showDelayDurationPicker = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AccessTime,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(context.getString(R.string.settings_rhythm_guard_break_dialog_pause_close))
+                    }
                 }
             },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = {
-                        musicViewModel.pauseMusic()
-                        appSettings.clearRhythmGuardListeningTimeout()
-                        breakDialogState = null
-                        closeRhythmApp(context)
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(context.getString(R.string.settings_rhythm_guard_break_dialog_pause_close))
-                }
-            }
+            dismissButton = {}
         )
+
+        if (showBreakDurationPicker) {
+            RhythmGuardTimePickerDialog(
+                title = context.getString(R.string.settings_rhythm_guard_break_dialog_picker_extend_title),
+                initialMinutes = breakResumeMinutes,
+                onDismiss = { showBreakDurationPicker = false },
+                onConfirm = { selectedMinutes ->
+                    breakResumeMinutes = selectedMinutes.coerceIn(1, 180)
+                    showBreakDurationPicker = false
+                }
+            )
+        }
+
+        if (showDelayDurationPicker) {
+            RhythmGuardTimePickerDialog(
+                title = context.getString(R.string.settings_rhythm_guard_break_dialog_picker_delay_title),
+                initialMinutes = breakDelayMinutes,
+                onDismiss = { showDelayDurationPicker = false },
+                onConfirm = { selectedMinutes ->
+                    val safeDelayMinutes = selectedMinutes.coerceIn(1, 180)
+                    breakDelayMinutes = safeDelayMinutes
+                    showDelayDurationPicker = false
+                    delayBreakReminder(safeDelayMinutes)
+                }
+            )
+        }
     }
+
+    val nowEpochMs = System.currentTimeMillis()
+    val isTimeoutBubbleActive = timeoutUntilMs > nowEpochMs && resumeCountdownSeconds > 0L
+    val isPendingStartBubbleActive =
+        pendingBreakStartAtMs > nowEpochMs && pendingBreakStartCountdownSeconds in 1L..60L
+    val bubbleVisible = isTimeoutBubbleActive || isPendingStartBubbleActive
 
     val timeoutTotalSeconds = ((timeoutUntilMs - timeoutStartedAtMs).coerceAtLeast(1_000L) / 1000f)
     val timeoutElapsedSeconds = (timeoutTotalSeconds - resumeCountdownSeconds.toFloat()).coerceAtLeast(0f)
     val timeoutProgress = (timeoutElapsedSeconds / timeoutTotalSeconds).coerceIn(0f, 1f)
+    val pendingStartProgress = ((60f - pendingBreakStartCountdownSeconds.toFloat()) / 60f).coerceIn(0f, 1f)
+    val bubbleCountdownSeconds = if (isTimeoutBubbleActive) resumeCountdownSeconds else pendingBreakStartCountdownSeconds
+    val bubbleProgress = if (isTimeoutBubbleActive) timeoutProgress else pendingStartProgress
+    val bubbleLabel = if (isTimeoutBubbleActive) {
+        if (timeoutReason.isNotBlank()) timeoutReason else context.getString(
+            R.string.settings_rhythm_guard_resume_countdown_label
+        )
+    } else {
+        context.getString(R.string.settings_rhythm_guard_delay_break_countdown_label)
+    }
+    val bubbleValueResId = if (isTimeoutBubbleActive) {
+        R.string.settings_rhythm_guard_resume_countdown_value
+    } else {
+        R.string.settings_rhythm_guard_start_countdown_value
+    }
     val density = androidx.compose.ui.platform.LocalDensity.current
 
     BoxWithConstraints(
@@ -765,7 +896,7 @@ private fun RhythmGuardWarningHost(
             .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         AnimatedVisibility(
-            visible = timeoutUntilMs > System.currentTimeMillis() && resumeCountdownSeconds > 0L,
+            visible = bubbleVisible,
             enter = fadeIn(animationSpec = tween(220)) + scaleIn(
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioNoBouncy,
@@ -774,27 +905,26 @@ private fun RhythmGuardWarningHost(
             ),
             exit = fadeOut(animationSpec = tween(200)) + scaleOut(animationSpec = tween(180))
         ) {
-            val bubbleLabel = if (timeoutReason.isNotBlank()) timeoutReason else context.getString(
-                R.string.settings_rhythm_guard_resume_countdown_label
-            )
-
             RhythmGuardResumeCountdownBubble(
-                countdownText = rhythmGuardFormatCountdown(resumeCountdownSeconds),
-                progress = timeoutProgress,
+                countdownText = rhythmGuardFormatCountdown(bubbleCountdownSeconds),
+                progress = bubbleProgress,
                 label = bubbleLabel,
+                countdownValueResId = bubbleValueResId,
                 modifier = Modifier
                     .align(if (isBubbleOnLeft) Alignment.CenterStart else Alignment.CenterEnd)
                     .offset(x = rawDragXDp.dp, y = bubbleOffsetYDp.dp)
-                    .pointerInput(timeoutReason, timeoutUntilMs, timeoutStartedAtMs) {
+                    .pointerInput(timeoutReason, timeoutUntilMs, timeoutStartedAtMs, isTimeoutBubbleActive) {
                         detectTapGestures(onTap = {
-                            RhythmGuardTimeoutActivity.start(
-                                context = context,
-                                reason = timeoutReason.ifBlank {
-                                    context.getString(R.string.settings_rhythm_guard_timeout_activity_default_reason)
-                                },
-                                timeoutUntilMs = timeoutUntilMs,
-                                timeoutStartedAtMs = timeoutStartedAtMs
-                            )
+                            if (isTimeoutBubbleActive) {
+                                RhythmGuardTimeoutActivity.start(
+                                    context = context,
+                                    reason = timeoutReason.ifBlank {
+                                        context.getString(R.string.settings_rhythm_guard_timeout_activity_default_reason)
+                                    },
+                                    timeoutUntilMs = timeoutUntilMs,
+                                    timeoutStartedAtMs = timeoutStartedAtMs
+                                )
+                            }
                         })
                     }
                     .pointerInput(isBubbleOnLeft) {
@@ -902,6 +1032,7 @@ private fun RhythmGuardResumeCountdownBubble(
     countdownText: String,
     progress: Float,
     label: String,
+    countdownValueResId: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -944,7 +1075,7 @@ private fun RhythmGuardResumeCountdownBubble(
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                 )
                 Text(
-                    text = context.getString(R.string.settings_rhythm_guard_resume_countdown_value, countdownText),
+                    text = context.getString(countdownValueResId, countdownText),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -954,9 +1085,51 @@ private fun RhythmGuardResumeCountdownBubble(
     }
 }
 
-private fun closeRhythmApp(context: android.content.Context) {
-    val activity = context as? android.app.Activity ?: return
-    activity.finishAffinity()
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RhythmGuardTimePickerDialog(
+    title: String,
+    initialMinutes: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    val context = LocalContext.current
+    val safeInitialMinutes = initialMinutes.coerceIn(1, 180)
+    val timePickerState = rememberTimePickerState(
+        initialHour = safeInitialMinutes / 60,
+        initialMinute = safeInitialMinutes % 60,
+        is24Hour = true
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        text = {
+            TimePicker(state = timePickerState)
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val selectedMinutes = (timePickerState.hour * 60 + timePickerState.minute)
+                        .coerceAtLeast(1)
+                    onConfirm(selectedMinutes)
+                }
+            ) {
+                Text(context.getString(R.string.bottomsheet_timer_set))
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text(context.getString(R.string.bottomsheet_cancel))
+            }
+        }
+    )
 }
 
 @Composable

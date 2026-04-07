@@ -20,8 +20,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import chromahub.rhythm.app.R
+import chromahub.rhythm.app.util.LyricLine
 import chromahub.rhythm.app.util.LyricsParser
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 @Composable
@@ -30,6 +33,7 @@ fun SyncedLyricsView(
     currentPlaybackTime: Long,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
+    parsedLyricsInput: List<LyricLine>? = null,
     onSeek: ((Long) -> Unit)? = null,
     syncOffset: Long = 0L, // TODO: Add UI controls for adjusting sync offset in real-time
     showTranslation: Boolean = true,
@@ -42,8 +46,18 @@ fun SyncedLyricsView(
     // TODO: Apply syncOffset to all timestamp comparisons for manual sync adjustment
     val adjustedPlaybackTime = currentPlaybackTime + syncOffset
     
-    val parsedLyrics = remember(lyrics) {
-        LyricsParser.parseLyrics(lyrics)
+    val parsedLyrics by produceState(
+        initialValue = parsedLyricsInput ?: emptyList(),
+        key1 = lyrics,
+        key2 = parsedLyricsInput
+    ) {
+        value = if (parsedLyricsInput != null) {
+            parsedLyricsInput
+        } else {
+            withContext(Dispatchers.Default) {
+                LyricsParser.parseLyrics(lyrics)
+            }
+        }
     }
 
     val coroutineScope = rememberCoroutineScope()

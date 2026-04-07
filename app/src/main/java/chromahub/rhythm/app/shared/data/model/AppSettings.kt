@@ -243,6 +243,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_UPDATE_NOTIFICATIONS_ENABLED = "update_notifications_enabled" // Push-style notifications
         private const val KEY_USE_SMART_UPDATE_POLLING = "use_smart_update_polling" // Use ETag/conditional requests
         private const val KEY_MEDIA_SCAN_MODE = "media_scan_mode" // Mode for media scanning: "blacklist" or "whitelist"
+        private const val KEY_INCLUDE_HIDDEN_WHITELISTED_MEDIA = "include_hidden_whitelisted_media"
         private const val KEY_UPDATE_CHECK_INTERVAL_HOURS = "update_check_interval_hours" // Configurable interval
 
         // Beta Program
@@ -1160,6 +1161,11 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
     // Media Scan Mode
     private val _mediaScanMode = MutableStateFlow(prefs.getString(KEY_MEDIA_SCAN_MODE, "blacklist") ?: "blacklist")
     val mediaScanMode: StateFlow<String> = _mediaScanMode.asStateFlow()
+
+    private val _includeHiddenWhitelistedMedia = MutableStateFlow(
+        prefs.getBoolean(KEY_INCLUDE_HIDDEN_WHITELISTED_MEDIA, true)
+    )
+    val includeHiddenWhitelistedMedia: StateFlow<Boolean> = _includeHiddenWhitelistedMedia.asStateFlow()
 
     private val _updateCheckIntervalHours = MutableStateFlow(prefs.getInt(KEY_UPDATE_CHECK_INTERVAL_HOURS, 6))
     val updateCheckIntervalHours: StateFlow<Int> = _updateCheckIntervalHours.asStateFlow()
@@ -2338,6 +2344,11 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _mediaScanMode.value = mode
     }
 
+    fun setIncludeHiddenWhitelistedMedia(include: Boolean) {
+        prefs.edit().putBoolean(KEY_INCLUDE_HIDDEN_WHITELISTED_MEDIA, include).apply()
+        _includeHiddenWhitelistedMedia.value = include
+    }
+
     fun setUpdateCheckIntervalHours(hours: Int) {
         prefs.edit().putInt(KEY_UPDATE_CHECK_INTERVAL_HOURS, hours).apply()
         _updateCheckIntervalHours.value = hours
@@ -3009,9 +3020,12 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             key == KEY_RECENTLY_PLAYED ||
             key == KEY_LISTENING_TIME ||
             key == KEY_SONGS_PLAYED ||
+            key == KEY_UNIQUE_ARTISTS ||
             key == KEY_GENRE_PREFERENCES ||
             key == KEY_FAVORITE_GENRES ||
             key == KEY_DAILY_LISTENING_STATS ||
+            key == KEY_WEEKLY_TOP_ARTISTS ||
+            key == KEY_MOOD_PREFERENCES ||
             key == KEY_SONG_PLAY_COUNTS ||
             key == KEY_HOME_SHOW_LISTENING_STATS ||
             key == KEY_RHYTHM_GUARD_MODE ||
@@ -3079,7 +3093,7 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         backupData["preferences_types"] = preferencesTypes
         backupData["timestamp"] = System.currentTimeMillis()
         backupData["app_version"] = "1.0.0" // You might want to get this dynamically
-        backupData["backup_version"] = 2 // Increment version to handle playlist data properly
+        backupData["backup_version"] = 3 // Includes explicit stats & Rhythm Guard payload
         backupData["selected_sections"] = mapOf(
             "general_settings" to effectiveSections.includeGeneralSettings,
             "library_data" to effectiveSections.includeLibraryData,
@@ -3137,6 +3151,32 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
                 Log.e("AppSettings", "Error including playlist data in backup", e)
             }
         }
+
+        if (effectiveSections.includeStatsAndRhythmGuard) {
+            try {
+                val statsPrefs = allPrefs.filterKeys { key ->
+                    isStatsAndRhythmGuardBackupKey(key)
+                }
+                val statsPreferenceTypes = mutableMapOf<String, String>()
+                statsPrefs.forEach { (key, value) ->
+                    statsPreferenceTypes[key] = when (value) {
+                        is Boolean -> "Boolean"
+                        is Float -> "Float"
+                        is Int -> "Int"
+                        is Long -> "Long"
+                        is String -> "String"
+                        is Set<*> -> "StringSet"
+                        else -> "Unknown"
+                    }
+                }
+
+                backupData["stats_rhythm_guard_data"] = statsPrefs
+                backupData["stats_rhythm_guard_types"] = statsPreferenceTypes
+                Log.d("AppSettings", "Including stats & Rhythm Guard data in backup: ${statsPrefs.size} keys")
+            } catch (e: Exception) {
+                Log.e("AppSettings", "Error including stats & Rhythm Guard data in backup", e)
+            }
+        }
         
         return Gson().toJson(backupData)
     }
@@ -3184,39 +3224,29 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
                 }
 
                 val originalType = preferencesTypes[key]
-                when (value) {
-                    is Boolean -> editor.putBoolean(key, value)
-                    is Float -> {
-                        // Check if this should be a Long or Int based on original type
-                        when (originalType) {
-                            "Long" -> editor.putLong(key, value.toLong())
-                            "Int" -> editor.putInt(key, value.toInt())
-                            else -> editor.putFloat(key, value)
-                        }
+                applyBackupPreferenceValue(editor, key, value, originalType)
+            }
+
+            if (sections.includeStatsAndRhythmGuard) {
+                val statsData = (backupData["stats_rhythm_guard_data"] as? Map<*, *>)
+                    ?.mapNotNull { (key, value) ->
+                        (key as? String)?.let { safeKey -> safeKey to value }
                     }
-                    is Int -> editor.putInt(key, value)
-                    is Long -> editor.putLong(key, value)
-                    is String -> editor.putString(key, value)
-                    is List<*> -> {
-                        if (originalType == "StringSet") {
-                            editor.putStringSet(key, value.mapNotNull { it?.toString() }.toSet())
-                        }
+                    ?.toMap()
+                    ?: emptyMap()
+                val statsTypes = (backupData["stats_rhythm_guard_types"] as? Map<*, *>)
+                    ?.mapNotNull { (key, value) ->
+                        val safeKey = key as? String ?: return@mapNotNull null
+                        val safeValue = value as? String ?: return@mapNotNull null
+                        safeKey to safeValue
                     }
-                    is Set<*> -> {
-                        if (originalType == "StringSet") {
-                            editor.putStringSet(key, value.mapNotNull { it?.toString() }.toSet())
-                        }
+                    ?.toMap()
+                    ?: emptyMap()
+
+                statsData.forEach { (key, value) ->
+                    if (isStatsAndRhythmGuardBackupKey(key)) {
+                        applyBackupPreferenceValue(editor, key, value, statsTypes[key] ?: preferencesTypes[key])
                     }
-                    is Double -> {
-                        // JSON deserializes numbers as Double, convert based on original type
-                        when (originalType) {
-                            "Float" -> editor.putFloat(key, value.toFloat())
-                            "Long" -> editor.putLong(key, value.toLong())
-                            "Int" -> editor.putInt(key, value.toInt())
-                            else -> editor.putFloat(key, value.toFloat()) // Default fallback
-                        }
-                    }
-                    // Handle any other types as needed
                 }
             }
             
@@ -3284,6 +3314,45 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         } catch (e: Exception) {
             Log.e("AppSettings", "Failed to restore backup", e)
             false
+        }
+    }
+
+    private fun applyBackupPreferenceValue(
+        editor: SharedPreferences.Editor,
+        key: String,
+        value: Any?,
+        originalType: String?
+    ) {
+        when (value) {
+            is Boolean -> editor.putBoolean(key, value)
+            is Float -> {
+                when (originalType) {
+                    "Long" -> editor.putLong(key, value.toLong())
+                    "Int" -> editor.putInt(key, value.toInt())
+                    else -> editor.putFloat(key, value)
+                }
+            }
+            is Int -> editor.putInt(key, value)
+            is Long -> editor.putLong(key, value)
+            is String -> editor.putString(key, value)
+            is List<*> -> {
+                if (originalType == "StringSet") {
+                    editor.putStringSet(key, value.mapNotNull { it?.toString() }.toSet())
+                }
+            }
+            is Set<*> -> {
+                if (originalType == "StringSet") {
+                    editor.putStringSet(key, value.mapNotNull { it?.toString() }.toSet())
+                }
+            }
+            is Double -> {
+                when (originalType) {
+                    "Float" -> editor.putFloat(key, value.toFloat())
+                    "Long" -> editor.putLong(key, value.toLong())
+                    "Int" -> editor.putInt(key, value.toInt())
+                    else -> editor.putFloat(key, value.toFloat())
+                }
+            }
         }
     }
     
@@ -3523,6 +3592,7 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _updateNotificationsEnabled.value = prefs.getBoolean(KEY_UPDATE_NOTIFICATIONS_ENABLED, BuildConfig.FLAVOR != "fdroid")
         _useSmartUpdatePolling.value = prefs.getBoolean(KEY_USE_SMART_UPDATE_POLLING, BuildConfig.FLAVOR != "fdroid")
         _mediaScanMode.value = prefs.getString(KEY_MEDIA_SCAN_MODE, "blacklist") ?: "blacklist"
+        _includeHiddenWhitelistedMedia.value = prefs.getBoolean(KEY_INCLUDE_HIDDEN_WHITELISTED_MEDIA, true)
         _updateCheckIntervalHours.value = prefs.getInt(KEY_UPDATE_CHECK_INTERVAL_HOURS, 24)
         
         // Re-schedule update notification worker if settings changed

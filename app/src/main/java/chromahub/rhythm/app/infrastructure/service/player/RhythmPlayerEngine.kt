@@ -380,21 +380,48 @@ class RhythmPlayerEngine(
         val incomingPlayer = playerB
 
         val isSelfTransition = outgoingPlayer.currentMediaItem?.mediaId == incomingPlayer.currentMediaItem?.mediaId
+        val outgoingMediaItemCount = outgoingPlayer.mediaItemCount
         val currentOutgoingIndex = outgoingPlayer.currentMediaItemIndex
+            .takeIf { it in 0 until outgoingMediaItemCount }
+            ?: 0
 
-        // Transfer queue history (items before current)
+        // Resolve where the incoming media item belongs in the outgoing queue.
+        // This keeps queue order stable across wrap-around transitions (e.g., last -> first with repeat-all)
+        // and prevents duplicating the first song as a permanent loop target.
+        val outgoingTimeline = outgoingPlayer.currentTimeline
+        val timelineNextIndex = if (!outgoingTimeline.isEmpty && currentOutgoingIndex != C.INDEX_UNSET) {
+            outgoingTimeline.getNextWindowIndex(
+                currentOutgoingIndex,
+                outgoingPlayer.repeatMode,
+                outgoingPlayer.shuffleModeEnabled
+            )
+        } else {
+            C.INDEX_UNSET
+        }
+        val incomingMediaId = incomingPlayer.currentMediaItem?.mediaId
+        val incomingQueueIndex = when {
+            isSelfTransition -> currentOutgoingIndex
+            timelineNextIndex in 0 until outgoingMediaItemCount -> timelineNextIndex
+            incomingMediaId != null -> (0 until outgoingMediaItemCount)
+                .firstOrNull { index -> outgoingPlayer.getMediaItemAt(index).mediaId == incomingMediaId }
+                ?: currentOutgoingIndex
+            else -> currentOutgoingIndex
+        }
+
         val historyToTransfer = mutableListOf<MediaItem>()
-        val historyEndIndex = if (isSelfTransition) currentOutgoingIndex else currentOutgoingIndex + 1
-        for (i in 0 until historyEndIndex) {
+        for (i in 0 until incomingQueueIndex) {
             historyToTransfer.add(outgoingPlayer.getMediaItemAt(i))
         }
 
-        // Transfer queue future (items after next)
         val futureToTransfer = mutableListOf<MediaItem>()
-        val futureStartIndex = if (isSelfTransition) currentOutgoingIndex + 1 else currentOutgoingIndex + 2
-        for (i in futureStartIndex until outgoingPlayer.mediaItemCount) {
+        for (i in (incomingQueueIndex + 1) until outgoingMediaItemCount) {
             futureToTransfer.add(outgoingPlayer.getMediaItemAt(i))
         }
+
+        Log.d(
+            TAG,
+            "Queue transfer indices: current=$currentOutgoingIndex, incoming=$incomingQueueIndex, nextFromTimeline=$timelineNextIndex, total=$outgoingMediaItemCount"
+        )
 
         // Transfer playback settings
         val repeatModeToTransfer = outgoingPlayer.repeatMode

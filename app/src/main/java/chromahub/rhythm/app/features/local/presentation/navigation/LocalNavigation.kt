@@ -1,5 +1,6 @@
 package chromahub.rhythm.app.features.local.presentation.navigation
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.clickable
@@ -122,6 +123,7 @@ import chromahub.rhythm.app.features.local.presentation.screens.settings.Setting
 import chromahub.rhythm.app.features.local.presentation.screens.settings.*
 import chromahub.rhythm.app.shared.data.model.PlaybackLocation
 import chromahub.rhythm.app.shared.presentation.components.MediaScanLoader // Add MediaScanLoader import
+import chromahub.rhythm.app.util.ArtistSeparator
 import chromahub.rhythm.app.util.HapticUtils
 import chromahub.rhythm.app.features.local.presentation.viewmodel.MusicViewModel
 import chromahub.rhythm.app.features.local.presentation.viewmodel.MusicViewModel.SortOrder
@@ -2008,7 +2010,22 @@ private fun LocalNavigationContent(
                                 }
                             },
                             onGoToArtist = { song ->
-                                navController.navigate(Screen.ArtistDetail.createRoute(song.artist))
+                                val separatorEnabled = appSettings.artistSeparatorEnabled.value
+                                val delimiters = appSettings.artistSeparatorDelimiters.value.ifBlank { "/;,+&" }
+                                val candidates = ArtistSeparator.splitArtists(
+                                    artistString = song.artist,
+                                    delimiters = delimiters,
+                                    enabled = separatorEnabled
+                                )
+                                val artistRouteName = candidates.firstOrNull { candidate ->
+                                    artists.any { it.name.equals(candidate, ignoreCase = true) }
+                                } ?: candidates.firstOrNull()?.trim().orEmpty().ifBlank {
+                                    song.artist.trim()
+                                }
+
+                                if (artistRouteName.isNotBlank()) {
+                                    navController.navigate(Screen.ArtistDetail.createRoute(artistRouteName))
+                                }
                             }
                         )
                     }

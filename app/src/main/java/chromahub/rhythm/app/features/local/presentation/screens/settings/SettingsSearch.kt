@@ -294,16 +294,6 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             settingKey = "useSystemVolume"
         ))
         add(SearchableSettingItem(
-            id = "stop_playback_on_zero_volume",
-            title = context.getString(R.string.settings_stop_playback_on_zero_volume),
-            description = context.getString(R.string.settings_stop_playback_on_zero_volume_desc),
-            keywords = listOf("zero volume", "pause", "mute", "stop playback", "volume"),
-            icon = Icons.Default.Stop,
-            route = SettingsRoutes.QUEUE_PLAYBACK,
-            parentScreen = context.getString(R.string.settings_section_queue_playback),
-            settingKey = "stopPlaybackOnZeroVolume"
-        ))
-        add(SearchableSettingItem(
             id = "resume_on_device_reconnect",
             title = context.getString(R.string.settings_resume_on_device_reconnect),
             description = context.getString(R.string.settings_resume_on_device_reconnect_desc),
@@ -362,6 +352,16 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             icon = Icons.Default.Folder,
             route = SettingsRoutes.MEDIA_SCAN,
             parentScreen = context.getString(R.string.settings_section_library_content)
+        ))
+        add(SearchableSettingItem(
+            id = "media_scan_hidden_whitelist",
+            title = context.getString(R.string.settings_include_hidden_whitelisted_media),
+            description = context.getString(R.string.settings_include_hidden_whitelisted_media_desc),
+            keywords = listOf("hidden", "nomedia", "whitelist", "scan behavior", "folders", "media scan"),
+            icon = Icons.Default.Visibility,
+            route = SettingsRoutes.MEDIA_SCAN,
+            parentScreen = context.getString(R.string.settings_section_library_content),
+            settingKey = "includeHiddenWhitelistedMedia"
         ))
         add(SearchableSettingItem(
             id = "artist_parsing",
@@ -781,8 +781,9 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             description = context.getString(R.string.settings_lyrics_show_translation_desc),
             keywords = listOf("lyrics", "translation", "translate", "multi-language", "subtitle"),
             icon = Icons.Default.Public,
-            route = SettingsRoutes.PLAYER_CUSTOMIZATION,
-            parentScreen = "Player"
+            route = SettingsRoutes.EXPERIMENTAL_FEATURES,
+            parentScreen = "Experimental",
+            settingKey = "showLyricsTranslation"
         ))
         add(SearchableSettingItem(
             id = "lyrics_show_romanization",
@@ -790,8 +791,9 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             description = context.getString(R.string.settings_lyrics_show_romanization_desc),
             keywords = listOf("lyrics", "romanization", "romaji", "pinyin", "transliteration"),
             icon = Icons.Default.TextFields,
-            route = SettingsRoutes.PLAYER_CUSTOMIZATION,
-            parentScreen = "Player"
+            route = SettingsRoutes.EXPERIMENTAL_FEATURES,
+            parentScreen = "Experimental",
+            settingKey = "showLyricsRomanization"
         ))
         add(SearchableSettingItem(
             id = "keep_screen_on_lyrics",
@@ -1178,8 +1180,8 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             description = context.getString(R.string.settings_bit_perfect_mode_desc_native),
             keywords = listOf("high-resolution", "hi-res", "bit perfect", "bit-perfect", "audio", "sample rate", "resampling", "hi-res", "quality", "lossless", "44.1khz", "48khz", "96khz", "192khz", "native", "dac", "exclusive", "exclusive usb", "usb-c", "otg"),
             icon = Icons.Default.HighQuality,
-            route = SettingsRoutes.QUEUE_PLAYBACK,
-            parentScreen = "Queue & Playback",
+            route = SettingsRoutes.EXPERIMENTAL_FEATURES,
+            parentScreen = "Experimental",
             settingKey = "bitPerfectMode"
         ))
         add(SearchableSettingItem(
@@ -1188,8 +1190,8 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             description = context.getString(R.string.settings_dac_usb_audio_desc),
             keywords = listOf("audio routing", "dac", "usb audio", "default routing", "app routing", "system routing", "output", "exclusive", "exclusive usb", "usb-c", "bit perfect", "direct"),
             icon = Icons.Default.Headphones,
-            route = SettingsRoutes.QUEUE_PLAYBACK,
-            parentScreen = "Queue & Playback",
+            route = SettingsRoutes.EXPERIMENTAL_FEATURES,
+            parentScreen = "Experimental",
             settingKey = "audioRoutingMode"
         ))
         

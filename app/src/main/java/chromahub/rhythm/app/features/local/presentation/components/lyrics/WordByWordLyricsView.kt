@@ -51,6 +51,33 @@ enum class WordAnimationPreset {
     MINIMAL       // Subtle color change only (TODO: implement)
 }
 
+private enum class SupplementalLineType {
+    MAIN,
+    TRANSLATION,
+    ROMANIZATION
+}
+
+private fun WordByWordLyricLine.asDisplayText(): String {
+    return words.joinToString(separator = "") { word ->
+        if (word.isPart && word.text.isNotEmpty()) word.text else " ${word.text}"
+    }.trim()
+}
+
+private fun classifySupplementalWordByWordLine(text: String): SupplementalLineType {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return SupplementalLineType.MAIN
+
+    if (trimmed.startsWith("(") && trimmed.endsWith(")") && trimmed.length > 2) {
+        return SupplementalLineType.TRANSLATION
+    }
+
+    if (trimmed.startsWith("[") && trimmed.endsWith("]") && trimmed.length > 2) {
+        return SupplementalLineType.ROMANIZATION
+    }
+
+    return SupplementalLineType.MAIN
+}
+
 /**
  * Composable for displaying word-by-word synchronized lyrics from Apple Music
  * TODO: Add animation preset system for different word highlighting styles
@@ -66,7 +93,9 @@ fun WordByWordLyricsView(
     animationPreset: WordAnimationPreset = WordAnimationPreset.DEFAULT, // TODO: Implement animation presets
     lyricsSource: String? = null, // Source of lyrics
     textSizeMultiplier: Float = 1.0f, // Scale factor for lyrics text size
-    textAlignment: TextAlign = TextAlign.Center // Alignment of lyrics text
+    textAlignment: TextAlign = TextAlign.Center, // Alignment of lyrics text
+    showTranslation: Boolean = true,
+    showRomanization: Boolean = true
 ) {
     val context = LocalContext.current
     // TODO: Apply syncOffset to all timestamp comparisons for manual sync adjustment
@@ -76,15 +105,25 @@ fun WordByWordLyricsView(
         AppleMusicLyricsParser.parseWordByWordLyrics(wordByWordLyrics)
     }
 
+    val visibleLyricsLines = remember(parsedLyrics, showTranslation, showRomanization) {
+        parsedLyrics.filter { line ->
+            when (classifySupplementalWordByWordLine(line.asDisplayText())) {
+                SupplementalLineType.TRANSLATION -> showTranslation
+                SupplementalLineType.ROMANIZATION -> showRomanization
+                SupplementalLineType.MAIN -> true
+            }
+        }
+    }
+
     // Create items list with gaps for instrumental sections
-    val lyricsItems = remember(parsedLyrics) {
+    val lyricsItems = remember(visibleLyricsLines) {
         val items = mutableListOf<LyricsItem>()
-        parsedLyrics.forEachIndexed { index, line ->
+        visibleLyricsLines.forEachIndexed { index, line ->
             items.add(LyricsItem.LyricLine(line, index))
             
             // Check for gap to next line
-            if (index < parsedLyrics.size - 1) {
-                val nextLine = parsedLyrics[index + 1]
+            if (index < visibleLyricsLines.size - 1) {
+                val nextLine = visibleLyricsLines[index + 1]
                 val gapDuration = nextLine.lineTimestamp - line.lineEndtime
                 if (gapDuration > 3000) { // 3 seconds threshold
                     items.add(LyricsItem.Gap(gapDuration, line.lineEndtime))
@@ -97,9 +136,9 @@ fun WordByWordLyricsView(
     val coroutineScope = rememberCoroutineScope()
     
     // Find current line index (among lyric lines only) - using adjustedPlaybackTime for sync offset
-    val currentLineIndex by remember(adjustedPlaybackTime, parsedLyrics) {
+    val currentLineIndex by remember(adjustedPlaybackTime, visibleLyricsLines) {
         derivedStateOf {
-            parsedLyrics.indexOfLast { line ->
+            visibleLyricsLines.indexOfLast { line ->
                 adjustedPlaybackTime >= line.lineTimestamp && adjustedPlaybackTime <= line.lineEndtime
             }
         }
@@ -121,7 +160,7 @@ fun WordByWordLyricsView(
 
     // Auto-scroll to current lyric line with elastic spring animation
     LaunchedEffect(currentLineIndex) {
-        if (currentLineIndex >= 0 && parsedLyrics.isNotEmpty()) {
+        if (currentLineIndex >= 0 && visibleLyricsLines.isNotEmpty()) {
             // Find the corresponding item index in lyricsItems
             val targetItemIndex = lyricsItems.indexOfFirst { item ->
                 item is LyricsItem.LyricLine && item.index == currentLineIndex
@@ -152,7 +191,7 @@ fun WordByWordLyricsView(
         }
     }
 
-    if (parsedLyrics.isEmpty()) {
+    if (visibleLyricsLines.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
@@ -324,8 +363,8 @@ fun WordByWordLyricsView(
                     }
                     is LyricsItem.Gap -> {
                         // Visual indicator for instrumental gap
-                        val isCurrentGap = currentPlaybackTime >= item.startTime && 
-                            currentPlaybackTime < item.startTime + item.duration
+                        val isCurrentGap = adjustedPlaybackTime >= item.startTime &&
+                            adjustedPlaybackTime < item.startTime + item.duration
                         
                         val gapHeight = (item.duration / 1000f).coerceIn(20f, 80f) // 20-80dp based on duration
                         

@@ -99,7 +99,7 @@ class ExternalPlaybackActivity : ComponentActivity() {
                     onOpenFullPlayer = {
                         val intent = Intent(this, MainActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                            putExtra("OPEN_PLAYER", true)
+                            putExtra(MainActivity.EXTRA_OPEN_PLAYER, true)
                         }
                         startActivity(intent)
                         finish()

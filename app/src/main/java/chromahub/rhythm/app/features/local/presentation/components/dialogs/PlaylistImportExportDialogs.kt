@@ -70,31 +70,51 @@ fun AppRestartDialog(
             )
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    onRestart()
-                    onDismiss()
-                }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.RestartAlt,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Restart Now")
+                Button(
+                    onClick = {
+                        onRestart()
+                        onDismiss()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.RestartAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(context.getString(R.string.restart_now))
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        onContinue()
+                        onDismiss()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(context.getString(R.string.continue_without_restart))
+                }
             }
         },
-        dismissButton = {
-            OutlinedButton(
-                onClick = {
-                    onContinue()
-                    onDismiss()
-                }
-            ) {
-                Text("Continue Without Restart")
-            }
-        }
+        dismissButton = {}
     )
 }
 

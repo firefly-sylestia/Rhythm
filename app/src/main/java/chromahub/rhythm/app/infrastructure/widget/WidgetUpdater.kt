@@ -7,6 +7,11 @@ import chromahub.rhythm.app.infrastructure.widget.glance.GlanceWidgetUpdater
 
 object WidgetUpdater {
     
+    private const val PREFS_FILE = "widget_prefs"
+    private const val KEY_IS_PLAYING = "is_playing"
+    private const val KEY_SONG_TITLE = "song_title"
+    private const val KEY_ARTIST_NAME = "artist_name"
+    
     fun updateWidget(
         context: Context,
         song: Song?,
@@ -15,22 +20,22 @@ object WidgetUpdater {
         hasNext: Boolean = false,
         isFavorite: Boolean = false
     ) {
-        val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
         val editor = prefs.edit()
         
         if (song != null) {
-            editor.putString("song_title", song.title)
-            editor.putString("artist_name", song.artist)
+            editor.putString(KEY_SONG_TITLE, song.title)
+            editor.putString(KEY_ARTIST_NAME, song.artist)
             editor.putString("album_name", song.album)
             editor.putString("artwork_uri", song.artworkUri?.toString())
         } else {
-            editor.putString("song_title", "Rhythm")
-            editor.putString("artist_name", "")
+            editor.putString(KEY_SONG_TITLE, "Rhythm")
+            editor.putString(KEY_ARTIST_NAME, "")
             editor.putString("album_name", "")
             editor.remove("artwork_uri")
         }
         
-        editor.putBoolean("is_playing", isPlaying)
+        editor.putBoolean(KEY_IS_PLAYING, isPlaying)
         editor.putBoolean("has_previous", hasPrevious)
         editor.putBoolean("has_next", hasNext)
         editor.putBoolean("is_favorite", isFavorite)
@@ -41,10 +46,13 @@ object WidgetUpdater {
         
         // Update modern Glance widget
         GlanceWidgetUpdater.updateWidget(context, song, isPlaying, hasPrevious, hasNext, isFavorite)
+
+        // Avoid forcing TileService listen cycles on every song change.
+        // The tile reads the latest snapshot from preferences in onStartListening.
     }
     
     fun clearWidget(context: Context) {
-        val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         
         // Update legacy RemoteViews widget
@@ -52,5 +60,7 @@ object WidgetUpdater {
         
         // Update modern Glance widget
         GlanceWidgetUpdater.updateWidgetEmpty(context)
+
+        // Avoid forcing TileService listen cycles during clear operations.
     }
 }

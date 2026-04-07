@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
@@ -12,6 +13,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -40,6 +42,9 @@ fun <T> DragDropLazyColumn(
     itemKey: (T) -> Any,
     itemContent: @Composable (item: T, isDragging: Boolean, index: Int) -> Unit
 ) {
+    val edgeThresholdPx = 84f
+    val maxAutoScrollSpeedPxPerFrame = 30f
+
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -47,15 +52,31 @@ fun <T> DragDropLazyColumn(
     var draggedDistance by remember { mutableFloatStateOf(0f) }
     var draggedItem by remember { mutableIntStateOf(-1) }
     var isDragging by remember { mutableStateOf(false) }
+    var autoScrollSpeedPx by remember { mutableFloatStateOf(0f) }
     
     val animatedOffset = remember { Animatable(0f) }
     
     LaunchedEffect(isDragging) {
         if (!isDragging) {
+            autoScrollSpeedPx = 0f
             animatedOffset.animateTo(
                 targetValue = 0f,
                 animationSpec = spring()
             )
+        }
+    }
+
+    LaunchedEffect(isDragging) {
+        while (isDragging) {
+            val speed = autoScrollSpeedPx
+            if (speed != 0f) {
+                val consumed = lazyListState.scrollBy(speed)
+                if (consumed != 0f) {
+                    draggedDistance += consumed
+                    animatedOffset.snapTo(draggedDistance)
+                }
+            }
+            withFrameNanos { }
         }
     }
     
@@ -75,9 +96,30 @@ fun <T> DragDropLazyColumn(
                 },
                 onDrag = { change, dragAmount ->
                     if (isDragging) {
+                        change.consume()
                         draggedDistance += dragAmount.y
                         scope.launch {
                             animatedOffset.snapTo(draggedDistance)
+                        }
+
+                        val viewportStart = lazyListState.layoutInfo.viewportStartOffset.toFloat()
+                        val viewportEnd = lazyListState.layoutInfo.viewportEndOffset.toFloat()
+                        val pointerY = change.position.y
+
+                        autoScrollSpeedPx = when {
+                            pointerY < viewportStart + edgeThresholdPx -> {
+                                val intensity = ((viewportStart + edgeThresholdPx - pointerY) / edgeThresholdPx)
+                                    .coerceIn(0f, 1f)
+                                -maxAutoScrollSpeedPxPerFrame * intensity
+                            }
+
+                            pointerY > viewportEnd - edgeThresholdPx -> {
+                                val intensity = ((pointerY - (viewportEnd - edgeThresholdPx)) / edgeThresholdPx)
+                                    .coerceIn(0f, 1f)
+                                maxAutoScrollSpeedPxPerFrame * intensity
+                            }
+
+                            else -> 0f
                         }
                         
                         val itemSize = lazyListState.layoutInfo.visibleItemsInfo
@@ -100,6 +142,7 @@ fun <T> DragDropLazyColumn(
                 },
                 onDragEnd = {
                     isDragging = false
+                    autoScrollSpeedPx = 0f
                     draggedItem = -1
                     draggedDistance = 0f
                 }

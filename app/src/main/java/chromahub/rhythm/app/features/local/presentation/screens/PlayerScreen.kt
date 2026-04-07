@@ -137,6 +137,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -185,10 +186,13 @@ import chromahub.rhythm.app.ui.theme.PlayerButtonColor
 // import chromahub.rhythm.app.shared.presentation.components.common.M3PlaceholderType
 import chromahub.rhythm.app.util.ImageUtils
 import chromahub.rhythm.app.util.HapticUtils
+import chromahub.rhythm.app.util.LyricsFileUtils
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.abs
 import chromahub.rhythm.app.shared.presentation.components.common.NetworkOperationLoader
@@ -519,32 +523,28 @@ fun PlayerScreen(
     val loadLyricsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.openInputStream(it)?.use { inputStream ->
-                    // Try to detect encoding and read with proper charset
-                    val bytes = inputStream.readBytes()
-                    val loadedLyrics = try {
-                        // Try UTF-8 first (most common)
-                        String(bytes, Charsets.UTF_8)
-                    } catch (e: Exception) {
-                        try {
-                            // Fallback to ISO-8859-1 (Latin-1)
-                            String(bytes, Charsets.ISO_8859_1)
-                        } catch (e2: Exception) {
-                            // Last resort: system default
-                            String(bytes)
-                        }
+        uri?.let { selectedUri ->
+            scope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        LyricsFileUtils.loadLyricsFromUri(context, selectedUri)
                     }
-                    // Save the loaded lyrics to the ViewModel
-                    musicViewModel.saveEditedLyrics(loadedLyrics)
-                    // Open the lyrics editor with the loaded content
-                    showLyricsEditorDialog = true
-                    Toast.makeText(context, "Lyrics loaded successfully", Toast.LENGTH_SHORT).show()
+
+                    if (result.lyrics != null) {
+                        musicViewModel.saveEditedLyrics(result.lyrics)
+                        showLyricsEditorDialog = true
+                        Toast.makeText(context, "Lyrics loaded successfully", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            result.errorMessage ?: "Error loading lyrics file",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    Log.e("PlayerScreen", "Error loading lyrics file", e)
+                    Toast.makeText(context, "Error loading lyrics: ${e.message}", Toast.LENGTH_LONG).show()
                 }
-            } catch (e: Exception) {
-                Log.e("PlayerScreen", "Error loading lyrics file", e)
-                Toast.makeText(context, "Error loading lyrics: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1128,6 +1128,74 @@ fun PlayerScreen(
             HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.LongPress)
             onBack()
         },
+        screenModifier = Modifier
+            .graphicsLayer {
+                // Apply swipe transitions to the whole scaffold so header and content dismiss together.
+                alpha = swipeAlpha
+                translationY = animatedSwipeOffset
+                scaleX = swipeScale
+                scaleY = swipeScale
+
+                // Add subtle corner radius animation (simulating mini player collapse)
+                clip = true
+                shape = RoundedCornerShape(
+                    topStart = swipeCornerRadius,
+                    topEnd = swipeCornerRadius,
+                    bottomStart = 0.dp,
+                    bottomEnd = 0.dp
+                )
+            }
+            .pointerInput(gesturePlayerSwipeDismiss) {
+                if (gesturePlayerSwipeDismiss) {
+                    var velocityTracker = 0f
+
+                    detectVerticalDragGestures(
+                        onDragStart = {
+                            isDragging = true
+                            isSwipeDismissing = false
+                            velocityTracker = 0f
+                        },
+                        onVerticalDrag = { change, dragAmount ->
+                            // Only allow downward swipes
+                            if (dragAmount > 0) {
+                                change.consume()
+                                val dragResistance = (1f - (swipeProgress * 0.35f)).coerceAtLeast(0.55f)
+                                swipeOffsetY = (swipeOffsetY + dragAmount * dragResistance).coerceIn(0f, dismissTargetOffset)
+                                velocityTracker = (dragAmount * 0.55f) + (velocityTracker * 0.45f)
+                            }
+                        },
+                        onDragEnd = {
+                            isDragging = false
+
+                            val fastSwipeThreshold = 900f
+                            val shouldDismiss = swipeOffsetY > swipeDismissThreshold ||
+                                (velocityTracker > fastSwipeThreshold && swipeOffsetY > screenHeight * 0.03f)
+
+                            if (shouldDismiss) {
+                                HapticUtils.performHapticFeedback(
+                                    context,
+                                    haptic,
+                                    HapticFeedbackType.LongPress
+                                )
+                                scope.launch {
+                                    isSwipeDismissing = true
+                                    swipeOffsetY = dismissTargetOffset
+                                    delay(240)
+                                    onBack()
+                                }
+                            } else {
+                                isSwipeDismissing = false
+                                swipeOffsetY = 0f
+                            }
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            isSwipeDismissing = false
+                            swipeOffsetY = 0f
+                        }
+                    )
+                }
+            },
         containerColor = playerBackgroundColor, // Use surfaceContainer for player screen header
         actions = {
             // Song info display in actions
@@ -1204,73 +1272,6 @@ fun PlayerScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    // Apply swipe transitions only (entry animations handled by AnimatedVisibility)
-                    alpha = swipeAlpha
-                    translationY = animatedSwipeOffset
-                    scaleX = swipeScale
-                    scaleY = swipeScale
-
-                    // Add subtle corner radius animation (simulating mini player collapse)
-                    clip = true
-                    shape = RoundedCornerShape(
-                        topStart = swipeCornerRadius,
-                        topEnd = swipeCornerRadius,
-                        bottomStart = 0.dp,
-                        bottomEnd = 0.dp
-                    )
-                }
-                .pointerInput(gesturePlayerSwipeDismiss) {
-                    if (gesturePlayerSwipeDismiss) {
-                        var velocityTracker = 0f
-
-                        detectVerticalDragGestures(
-                            onDragStart = {
-                                isDragging = true
-                                isSwipeDismissing = false
-                                velocityTracker = 0f
-                            },
-                            onVerticalDrag = { change, dragAmount ->
-                                // Only allow downward swipes
-                                if (dragAmount > 0) {
-                                    change.consume()
-                                    val dragResistance = (1f - (swipeProgress * 0.35f)).coerceAtLeast(0.55f)
-                                    swipeOffsetY = (swipeOffsetY + dragAmount * dragResistance).coerceIn(0f, dismissTargetOffset)
-                                    velocityTracker = (dragAmount * 0.55f) + (velocityTracker * 0.45f)
-                                }
-                            },
-                            onDragEnd = {
-                                isDragging = false
-
-                                val fastSwipeThreshold = 900f
-                                val shouldDismiss = swipeOffsetY > swipeDismissThreshold ||
-                                    (velocityTracker > fastSwipeThreshold && swipeOffsetY > screenHeight * 0.03f)
-
-                                if (shouldDismiss) {
-                                    HapticUtils.performHapticFeedback(
-                                        context,
-                                        haptic,
-                                        HapticFeedbackType.LongPress
-                                    )
-                                    scope.launch {
-                                        isSwipeDismissing = true
-                                        swipeOffsetY = dismissTargetOffset
-                                        delay(240)
-                                        onBack()
-                                    }
-                                } else {
-                                    isSwipeDismissing = false
-                                    swipeOffsetY = 0f
-                                }
-                            },
-                            onDragCancel = {
-                                isDragging = false
-                                isSwipeDismissing = false
-                                swipeOffsetY = 0f
-                            }
-                        )
-                    }
-                }
         ) {
             // Enhanced swipe indicator with progress feedback
             AnimatedVisibility(
@@ -2015,7 +2016,7 @@ fun PlayerScreen(
                                                                                 arrayOf(
                                                                                     "text/plain",
                                                                                     "text/*",
-                                                                                    "*/*"
+                                                                                    "application/octet-stream"
                                                                                 )
                                                                             )
                                                                         },
@@ -2051,26 +2052,66 @@ fun PlayerScreen(
                                                             onSeek = onLyricsSeek,
                                                             lyricsSource = lyrics?.source,
                                                             textSizeMultiplier = playerLyricsTextSize,
-                                                            textAlignment = lyricsTextAlign
+                                                            textAlignment = lyricsTextAlign,
+                                                            showTranslation = showLyricsTranslation,
+                                                            showRomanization = showLyricsRomanization
                                                         )
                                                     } else {
                                                         // Fall back to line-by-line synced or plain lyrics
                                                         val lyricsText = remember(lyrics) {
                                                             lyrics?.getBestLyrics() ?: ""
                                                         }
-
-                                                        val parsedLyrics = remember(lyricsText) {
-                                                            chromahub.rhythm.app.util.LyricsParser.parseLyrics(
-                                                                lyricsText
+                                                        val filteredPlainLyricsText = remember(
+                                                            lyricsText,
+                                                            showLyricsTranslation,
+                                                            showLyricsRomanization
+                                                        ) {
+                                                            filterPlainLyricsByPreference(
+                                                                rawLyrics = lyricsText,
+                                                                showTranslation = showLyricsTranslation,
+                                                                showRomanization = showLyricsRomanization
                                                             )
                                                         }
 
-                                                        if (parsedLyrics.isNotEmpty()) {
+                                                        val likelySyncedLyrics = remember(lyricsText) {
+                                                            Regex("\\[\\d{1,3}:\\d{2}(?:[.:]\\d{0,3})?]")
+                                                                .containsMatchIn(lyricsText)
+                                                        }
+
+                                                        val parsedLyrics by produceState<List<chromahub.rhythm.app.util.LyricLine>?>(
+                                                            initialValue = if (likelySyncedLyrics) null else emptyList(),
+                                                            key1 = lyricsText,
+                                                            key2 = likelySyncedLyrics
+                                                        ) {
+                                                            value = if (!likelySyncedLyrics) {
+                                                                emptyList()
+                                                            } else {
+                                                                withContext(Dispatchers.Default) {
+                                                                    chromahub.rhythm.app.util.LyricsParser.parseLyrics(
+                                                                        lyricsText
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+
+                                                        if (parsedLyrics == null) {
+                                                            Box(
+                                                                modifier = Modifier.fillMaxSize(),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                CircularProgressIndicator(
+                                                                    color = MaterialTheme.colorScheme.primary,
+                                                                    strokeWidth = 2.dp,
+                                                                    modifier = Modifier.size(28.dp)
+                                                                )
+                                                            }
+                                                        } else if (!parsedLyrics.isNullOrEmpty()) {
                                                             // Use SyncedLyricsView for line-by-line synchronized lyrics
                                                             SyncedLyricsView(
                                                                 lyrics = lyricsText,
                                                                 currentPlaybackTime = currentTimeMs,
                                                                 modifier = Modifier.fillMaxSize(),
+                                                                parsedLyricsInput = parsedLyrics,
                                                                 onSeek = onLyricsSeek,
                                                                 showTranslation = showLyricsTranslation,
                                                                 showRomanization = showLyricsRomanization,
@@ -2091,7 +2132,7 @@ fun PlayerScreen(
                                                                 }
                                                             ) {
                                                                 Text(
-                                                                    text = lyricsText,
+                                                                    text = filteredPlainLyricsText,
                                                                     style = MaterialTheme.typography.bodyLarge.copy(
                                                                         fontSize = MaterialTheme.typography.bodyLarge.fontSize * playerLyricsTextSize,
                                                                         lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.6f * playerLyricsTextSize,
@@ -4154,6 +4195,51 @@ fun PlaybackSpeedDialog(
             }
         }
     )
+}
+
+private fun filterPlainLyricsByPreference(
+    rawLyrics: String,
+    showTranslation: Boolean,
+    showRomanization: Boolean
+): String {
+    if (rawLyrics.isBlank()) return rawLyrics
+    if (showTranslation && showRomanization) return rawLyrics
+
+    val filteredLines = mutableListOf<String>()
+    var previousMainLineWasNonAscii = false
+
+    rawLyrics.lineSequence().forEach { line ->
+        val trimmed = line.trim()
+
+        if (trimmed.isEmpty()) {
+            filteredLines += line
+            return@forEach
+        }
+
+        val isBracketTranslation = trimmed.startsWith("(") && trimmed.endsWith(")") && trimmed.length > 2
+        val isBracketRomanization = trimmed.startsWith("[") && trimmed.endsWith("]") && trimmed.length > 2
+        val hasLettersOrDigits = trimmed.any { it.isLetterOrDigit() }
+        val isAsciiOnly = trimmed.all { char ->
+            char.code <= 127 || char.isWhitespace()
+        }
+        val inferredRomanization = hasLettersOrDigits && isAsciiOnly && previousMainLineWasNonAscii
+
+        val shouldHide =
+            (!showTranslation && isBracketTranslation) ||
+                (!showRomanization && (isBracketRomanization || inferredRomanization))
+
+        if (shouldHide) {
+            return@forEach
+        }
+
+        filteredLines += line
+
+        if (!isBracketTranslation && !isBracketRomanization && !inferredRomanization) {
+            previousMainLineWasNonAscii = trimmed.any { it.code > 127 }
+        }
+    }
+
+    return filteredLines.joinToString("\n")
 }
 
 @Composable

@@ -188,7 +188,8 @@ class MusicRepository(context: Context) {
                     bitrate = song.bitrate,
                     sampleRate = song.sampleRate,
                     channels = song.channels,
-                    codec = song.codec
+                    codec = song.codec,
+                    discNumber = song.discNumber
                 )
             }
             
@@ -284,7 +285,8 @@ class MusicRepository(context: Context) {
                         bitrate = entity.bitrate,
                         sampleRate = entity.sampleRate,
                         channels = entity.channels,
-                        codec = entity.codec
+                        codec = entity.codec,
+                        discNumber = entity.discNumber
                     )
                 } catch (e: Exception) {
                     Log.w(TAG, "Skipping corrupted Room entry: ${entity.id}", e)
@@ -478,6 +480,11 @@ class MusicRepository(context: Context) {
         var duplicatesFound = 0
         var filteredByFormat = 0
         var filteredByQuality = 0
+
+        val appSettings = AppSettings.getInstance(context)
+        val mediaScanMode = appSettings.mediaScanMode.value
+        val whitelistedFolders = appSettings.whitelistedFolders.value
+        val includeHiddenWhitelistedMedia = appSettings.includeHiddenWhitelistedMedia.value
         
         Log.d(TAG, "Starting media scan on Android ${Build.VERSION.SDK_INT} (API ${Build.VERSION.SDK_INT})")
         
@@ -590,8 +597,7 @@ class MusicRepository(context: Context) {
                 var processedCount = 0
                 val batchSize = 100
                 val pathColumnIndex = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
-                // Pre-load AppSettings once to avoid per-song getInstance calls (performance fix for Android 8-10)
-                val appSettings = AppSettings.getInstance(context)
+                // Pre-loaded AppSettings is reused here to avoid repeated getInstance calls.
                 
                 while (cursor.moveToNext()) {
                     try {
@@ -665,6 +671,26 @@ class MusicRepository(context: Context) {
                 
                 val endTime = System.currentTimeMillis()
                 val duration = endTime - startTime
+
+                // In whitelist mode, also scan explicit folders to include hidden/.nomedia files
+                // that MediaStore may not index.
+                if (mediaScanMode == "whitelist" && includeHiddenWhitelistedMedia && whitelistedFolders.isNotEmpty()) {
+                    val whitelistSongs = loadSongsFromWhitelistedFolders(
+                        whitelistedFolders = whitelistedFolders,
+                        seenPaths = seenPaths,
+                        allowedFormats = allowedFormats,
+                        minimumDuration = minimumDuration,
+                        appSettings = appSettings
+                    )
+                    if (whitelistSongs.isNotEmpty()) {
+                        songs.addAll(whitelistSongs)
+                        Log.d(
+                            TAG,
+                            "Added ${whitelistSongs.size} songs from whitelisted folders (hidden/.nomedia support)"
+                        )
+                    }
+                }
+
                 Log.d(TAG, "Loaded ${songs.size} songs in ${duration}ms")
                 Log.d(TAG, "Filtering stats - Duplicates: $duplicatesFound, Format: $filteredByFormat, Quality: $filteredByQuality, Errors: ${errors.size}")
                 
@@ -844,18 +870,163 @@ class MusicRepository(context: Context) {
         val albumArtist: Int, // May be -1 if not available on older devices
         val discNumber: Int
     )
+
+    private fun loadSongsFromWhitelistedFolders(
+        whitelistedFolders: List<String>,
+        seenPaths: MutableSet<String>,
+        allowedFormats: Set<String>?,
+        minimumDuration: Long,
+        appSettings: AppSettings
+    ): List<Song> {
+        val discovered = mutableListOf<Song>()
+
+        for (folderPath in whitelistedFolders) {
+            val root = File(folderPath)
+            if (!root.exists() || !root.isDirectory) {
+                continue
+            }
+
+            root.walkTopDown().forEach { file ->
+                if (!file.isFile) return@forEach
+
+                val extension = file.extension.lowercase()
+                if (!isSupportedAudioExtension(extension, allowedFormats)) {
+                    return@forEach
+                }
+
+                val absolutePath = file.absolutePath
+                if (seenPaths.contains(absolutePath)) {
+                    return@forEach
+                }
+
+                val song = createSongFromFile(file, appSettings) ?: return@forEach
+                if (song.duration <= 10_000L) {
+                    return@forEach
+                }
+                if (minimumDuration > 0 && song.duration < minimumDuration) {
+                    return@forEach
+                }
+
+                seenPaths.add(absolutePath)
+                discovered.add(song)
+            }
+        }
+
+        return discovered
+    }
+
+    private fun isSupportedAudioExtension(extension: String, allowedFormats: Set<String>?): Boolean {
+        if (extension.isBlank()) return false
+        if (allowedFormats != null) {
+            return allowedFormats.contains(extension)
+        }
+
+        return extension in setOf(
+            "mp3", "m4a", "flac", "ogg", "opus", "wav", "aac", "alac", "aiff", "aif", "wma"
+        )
+    }
+
+    private fun createSongFromFile(file: File, appSettings: AppSettings): Song? {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+
+            val title = normalizeMetadataText(
+                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE)
+            )
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: file.nameWithoutExtension
+            val artist = normalizeMetadataText(
+                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
+            )
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "Unknown Artist"
+            val album = normalizeMetadataText(
+                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM)
+            )
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "Unknown Album"
+            val albumArtist = normalizeMetadataText(
+                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
+            )
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            val duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?: 0L
+            val year = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_YEAR)
+                ?.toIntOrNull()
+                ?: 0
+
+            val trackRaw = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                ?.substringBefore("/")
+                ?.toIntOrNull()
+                ?: 0
+            val trackNumber = if (trackRaw >= 1000) trackRaw % 1000 else trackRaw
+            val fallbackDiscNumber = if (trackRaw >= 1000) trackRaw / 1000 else 1
+
+            if (title.isBlank() || title.equals("<unknown>", ignoreCase = true)) {
+                return null
+            }
+
+            Song(
+                id = "file_${file.absolutePath.hashCode()}_${file.length()}",
+                title = title,
+                artist = artist,
+                album = album,
+                albumId = "local_${album.lowercase().hashCode()}",
+                duration = duration,
+                uri = Uri.fromFile(file),
+                artworkUri = null,
+                trackNumber = trackNumber,
+                year = year,
+                genre = null,
+                dateAdded = file.lastModified(),
+                albumArtist = albumArtist,
+                bitrate = null,
+                sampleRate = null,
+                channels = null,
+                codec = file.extension.uppercase().ifBlank { null },
+                discNumber = fallbackDiscNumber.coerceAtLeast(1)
+            )
+        } catch (e: Exception) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+                // Ignore release exceptions.
+            }
+        }
+    }
     
+    private fun normalizeMetadataText(value: String?): String? {
+        val raw = value?.trim() ?: return value
+        if (raw.isBlank()) return raw
+
+        val looksMojibake = raw.contains('Ã') || raw.contains('Â') || raw.contains("â")
+        if (!looksMojibake) return raw
+
+        return runCatching {
+            val repaired = String(raw.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
+            if (repaired.isBlank()) raw else repaired
+        }.getOrDefault(raw)
+    }
+
     private fun createSongFromCursor(cursor: android.database.Cursor, indices: ColumnIndices, appSettings: AppSettings = AppSettings.getInstance(context)): Song? {
         return try {
             val id = cursor.getLong(indices.id)
-            val title = cursor.getString(indices.title)?.trim() ?: return null
-            val rawArtist = cursor.getString(indices.artist)?.trim() ?: "Unknown Artist"
+            val title = normalizeMetadataText(cursor.getString(indices.title))?.trim() ?: return null
+            val rawArtist = normalizeMetadataText(cursor.getString(indices.artist))?.trim() ?: "Unknown Artist"
             
             // Keep the full artist string so songs appear under all their artists.
             // The display-time splitArtistNames logic handles splitting for grouping/filtering.
             val artist = rawArtist
             
-            val album = cursor.getString(indices.album)?.trim() ?: "Unknown Album"
+            val album = normalizeMetadataText(cursor.getString(indices.album))?.trim() ?: "Unknown Album"
             val albumId = cursor.getLong(indices.albumId)
             val duration = cursor.getLong(indices.duration)
             val rawTrack = cursor.getInt(indices.track)
@@ -871,9 +1042,9 @@ class MusicRepository(context: Context) {
             val year = cursor.getInt(indices.year)
             val dateAdded = cursor.getLong(indices.dateAdded) * 1000L
             val size = cursor.getLong(indices.size)
-            val genreId = if (indices.genre >= 0) cursor.getString(indices.genre)?.trim() else null
+            val genreId = if (indices.genre >= 0) normalizeMetadataText(cursor.getString(indices.genre))?.trim() else null
             val albumArtist = if (indices.albumArtist >= 0) {
-                cursor.getString(indices.albumArtist)?.trim()?.takeIf { it.isNotBlank() }
+                normalizeMetadataText(cursor.getString(indices.albumArtist))?.trim()?.takeIf { it.isNotBlank() }
             } else null
 
             // Skip files that are too small (likely invalid)
@@ -1864,6 +2035,15 @@ class MusicRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val updatedArtists = mutableListOf<Artist>()
 
+            val allSongsForLocalLookup = runCatching { loadSongs() }.getOrDefault(emptyList())
+            val appSettings = AppSettings.getInstance(context)
+            val groupByAlbumArtist = appSettings.groupByAlbumArtist.value
+            val preloadedCharDelimiters: List<String> = if (appSettings.artistSeparatorEnabled.value) {
+                appSettings.artistSeparatorDelimiters.value.toList().map { it.toString() }
+            } else {
+                emptyList()
+            }
+
             // NetworkClient will handle API key dynamically (user-provided or fallback to default)
 
             for (artist in artists) {
@@ -1893,6 +2073,20 @@ class MusicRepository(context: Context) {
                         Log.d(TAG, "Using local image for artist: ${artist.name}")
                         artistImageCache[artist.name] = localImage
                         updatedArtists.add(artist.copy(artworkUri = localImage))
+                        continue
+                    }
+
+                    // Check music-library folders for artist.jpg / band.jpg style images.
+                    val localFolderImage = findArtistImageInLibraryFolders(
+                        artistName = artist.name,
+                        songs = allSongsForLocalLookup,
+                        groupByAlbumArtist = groupByAlbumArtist,
+                        preloadedCharDelimiters = preloadedCharDelimiters
+                    )
+                    if (localFolderImage != null) {
+                        Log.d(TAG, "Using folder image for artist: ${artist.name} -> $localFolderImage")
+                        artistImageCache[artist.name] = localFolderImage
+                        updatedArtists.add(artist.copy(artworkUri = localFolderImage))
                         continue
                     }
 
@@ -4255,6 +4449,77 @@ class MusicRepository(context: Context) {
         val fileName = "${artistName}.jpg".replace(Regex("[^a-zA-Z0-9._-]"), "_")
         val file = File(context.filesDir, "artist_images/$fileName")
         return if (file.exists()) Uri.fromFile(file) else null
+    }
+
+    /**
+     * Finds artist image from song-adjacent folders.
+     * Checks common names like artist.jpg or band.jpg in album/artist parent folders.
+     */
+    private fun findArtistImageInLibraryFolders(
+        artistName: String,
+        songs: List<Song>,
+        groupByAlbumArtist: Boolean,
+        preloadedCharDelimiters: List<String>
+    ): Uri? {
+        if (artistName.isBlank() || songs.isEmpty()) return null
+
+        val normalizedArtistName = artistName.trim()
+        val candidateSongs = songs.filter { song ->
+            val explicitAlbumArtist = song.albumArtist?.trim().orEmpty()
+            val names = if (groupByAlbumArtist) {
+                if (explicitAlbumArtist.isNotBlank() && !explicitAlbumArtist.equals("<unknown>", ignoreCase = true)) {
+                    splitArtistNames(explicitAlbumArtist, preloadedCharDelimiters)
+                } else {
+                    splitArtistNames(song.artist, preloadedCharDelimiters)
+                }
+            } else {
+                splitArtistNames(song.artist, preloadedCharDelimiters)
+            }
+
+            names.any { it.equals(normalizedArtistName, ignoreCase = true) }
+        }
+
+        if (candidateSongs.isEmpty()) return null
+
+        val candidateDirs = linkedSetOf<File>()
+        candidateSongs.forEach { song ->
+            val songPath = getFilePathFromUri(song.uri) ?: return@forEach
+            val songFile = File(songPath)
+            val albumDir = songFile.parentFile ?: return@forEach
+
+            candidateDirs.add(albumDir)
+            albumDir.parentFile?.let { candidateDirs.add(it) }
+            albumDir.parentFile?.parentFile?.let { candidateDirs.add(it) }
+        }
+
+        if (candidateDirs.isEmpty()) return null
+
+        val preferredNames = listOf(
+            "artist.jpg",
+            "artist.jpeg",
+            "artist.png",
+            "artist.webp",
+            "band.jpg",
+            "band.jpeg",
+            "band.png",
+            "band.webp"
+        )
+
+        for (dir in candidateDirs) {
+            val files = dir.listFiles() ?: continue
+            if (files.isEmpty()) continue
+
+            val byLowerName = files
+                .filter { it.isFile }
+                .associateBy { it.name.lowercase() }
+
+            for (preferred in preferredNames) {
+                val match = byLowerName[preferred] ?: continue
+                return Uri.fromFile(match)
+            }
+        }
+
+        return null
     }
 
     /**

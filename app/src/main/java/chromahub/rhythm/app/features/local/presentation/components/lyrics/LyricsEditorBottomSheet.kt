@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +72,11 @@ import chromahub.rhythm.app.shared.presentation.components.common.ButtonGroupSty
 import chromahub.rhythm.app.shared.presentation.components.common.ExpressiveButtonGroup
 import chromahub.rhythm.app.shared.presentation.components.common.ExpressiveGroupButton
 import chromahub.rhythm.app.util.HapticUtils
+import chromahub.rhythm.app.util.LyricsFileUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,6 +91,7 @@ fun LyricsEditorBottomSheet(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
     var editedLyrics by remember { mutableStateOf(currentLyrics) }
     var timeOffset by remember { mutableIntStateOf(initialTimeOffset) }
     val sheetState = rememberModalBottomSheetState(
@@ -168,16 +174,27 @@ fun LyricsEditorBottomSheet(
     val loadLyricsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.openInputStream(it)?.use { inputStream ->
-                    val loadedLyrics = inputStream.bufferedReader().readText()
-                    editedLyrics = loadedLyrics
-                    Toast.makeText(context, "Lyrics loaded successfully", Toast.LENGTH_SHORT).show()
+        uri?.let { selectedUri ->
+            scope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        LyricsFileUtils.loadLyricsFromUri(context, selectedUri)
+                    }
+
+                    if (result.lyrics != null) {
+                        editedLyrics = result.lyrics
+                        Toast.makeText(context, "Lyrics loaded successfully", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            result.errorMessage ?: "Error loading lyrics file",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    Log.e("LyricsEditor", "Error loading lyrics file", e)
+                    Toast.makeText(context, "Error loading lyrics: ${e.message}", Toast.LENGTH_LONG).show()
                 }
-            } catch (e: Exception) {
-                Log.e("LyricsEditor", "Error loading lyrics file", e)
-                Toast.makeText(context, "Error loading lyrics: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -565,7 +582,7 @@ fun LyricsEditorBottomSheet(
                 ExpressiveGroupButton(
                     onClick = {
                         HapticUtils.performHapticFeedback(context, haptic, HapticFeedbackType.LongPress)
-                        loadLyricsLauncher.launch(arrayOf("text/plain", "text/*", "*/*"))
+                        loadLyricsLauncher.launch(arrayOf("text/plain", "text/*", "application/octet-stream"))
                     },
                     modifier = Modifier.weight(1f),
                     isStart = true

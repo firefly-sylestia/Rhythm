@@ -66,6 +66,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     private var lastShuffleState: Boolean? = null
     private var lastRepeatMode: Int? = null
     private var lastFavoriteState: Boolean? = null
+    private var lastWidgetSnapshotKey: String? = null
     
     // Debounce custom layout updates to prevent flickering
     private var updateLayoutJob: Job? = null
@@ -737,92 +738,72 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     private fun toggleCurrentSongFavorite() {
         val currentMediaItem = player.currentMediaItem
         if (currentMediaItem != null) {
-            serviceScope.launch {
-                try {
-                    // Get current favorites
-                    val favoriteSongsJson = appSettings.favoriteSongs.value
-                    val currentFavorites = if (favoriteSongsJson != null && favoriteSongsJson.isNotEmpty()) {
-                        try {
-                            val type = object : TypeToken<Set<String>>() {}.type
-                            Gson().fromJson<Set<String>>(favoriteSongsJson, type).toMutableSet()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error parsing favorite songs", e)
-                            mutableSetOf<String>()
-                        }
-                    } else {
+            try {
+                val favoriteSongsJson = appSettings.favoriteSongs.value
+                val currentFavorites = if (favoriteSongsJson != null && favoriteSongsJson.isNotEmpty()) {
+                    try {
+                        val type = object : TypeToken<Set<String>>() {}.type
+                        Gson().fromJson<Set<String>>(favoriteSongsJson, type).toMutableSet()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing favorite songs", e)
                         mutableSetOf<String>()
                     }
-                    
-                    val songId = currentMediaItem.mediaId
-                    val wasRemoving = currentFavorites.contains(songId)
-                    
-                    // Toggle favorite status
-                    if (currentFavorites.contains(songId)) {
-                        currentFavorites.remove(songId)
-                        Log.d(TAG, "Removed song from favorites via notification: $songId")
-                    } else {
-                        currentFavorites.add(songId)
-                        Log.d(TAG, "Added song to favorites via notification: $songId")
-                    }
-                    
-                    // Save updated favorites
-                    val updatedJson = Gson().toJson(currentFavorites)
-                    appSettings.setFavoriteSongs(updatedJson)
-                    
-                    // Also need to update the favorites playlist to stay in sync
-                    updateFavoritesPlaylist(songId, !wasRemoving)
-                    
-                    // Notify ViewModel about favorite change
-                    val notifyIntent = Intent("chromahub.rhythm.app.action.FAVORITE_CHANGED")
-                    sendBroadcast(notifyIntent)
-                    Log.d(TAG, "Sent FAVORITE_CHANGED broadcast to notify ViewModel")
-                    
-                    // Schedule custom layout update with debouncing
-                    scheduleCustomLayoutUpdate(200) // Longer delay for favorite changes
-                    
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error toggling favorite", e)
+                } else {
+                    mutableSetOf<String>()
                 }
+
+                val songId = currentMediaItem.mediaId
+                val song = convertMediaItemToSong(currentMediaItem)
+                val isAdding = !currentFavorites.contains(songId)
+
+                if (isAdding) {
+                    currentFavorites.add(songId)
+                    Log.d(TAG, "Added song to favorites via widget/notification: $songId")
+                } else {
+                    currentFavorites.remove(songId)
+                    Log.d(TAG, "Removed song from favorites via widget/notification: $songId")
+                }
+
+                appSettings.setFavoriteSongs(Gson().toJson(currentFavorites))
+                updateFavoritesPlaylist(songId = songId, song = song, isAdding = isAdding)
+
+                val notifyIntent = Intent("chromahub.rhythm.app.action.FAVORITE_CHANGED")
+                sendBroadcast(notifyIntent)
+                Log.d(TAG, "Sent FAVORITE_CHANGED broadcast to notify ViewModel")
+
+                scheduleCustomLayoutUpdate(120)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error toggling favorite", e)
             }
         }
     }
-    
-    private fun updateFavoritesPlaylist(songId: String, isAdding: Boolean) {
+
+    private fun updateFavoritesPlaylist(songId: String, song: Song?, isAdding: Boolean) {
         try {
-            // Get current playlists
             val playlistsJson = appSettings.playlists.value
             if (playlistsJson.isNullOrEmpty()) return
             
             val type = object : TypeToken<List<Playlist>>() {}.type
             val playlists: MutableList<Playlist> = Gson().fromJson(playlistsJson, type)
             
-            // Find and update the Liked playlist (ID: "1")
-            val favoritesPlaylist = playlists.find { it.id == "1" && it.name == "Liked" }
-            if (favoritesPlaylist != null) {
-                val updatedPlaylist = if (isAdding) {
-                    // Add song to favorites playlist if not already there
-                    if (!favoritesPlaylist.songs.any { it.id == songId }) {
-                        // Find the song to add (would need access to all songs, this is a limitation)
-                        Log.d(TAG, "Would add song $songId to favorites playlist, but song details not available in service")
-                        favoritesPlaylist
-                    } else {
-                        favoritesPlaylist
-                    }
-                } else {
-                    // Remove song from favorites playlist
-                    favoritesPlaylist.copy(
-                        songs = favoritesPlaylist.songs.filter { it.id != songId },
-                        dateModified = System.currentTimeMillis()
-                    )
-                }
-                
-                // Update the playlist in the list
-                val updatedPlaylists = playlists.map { if (it.id == "1") updatedPlaylist else it }
-                val updatedPlaylistsJson = Gson().toJson(updatedPlaylists)
-                appSettings.setPlaylists(updatedPlaylistsJson)
-                
-                Log.d(TAG, "Updated favorites playlist: ${if (isAdding) "added" else "removed"} song $songId")
+            val favoritesPlaylist = playlists.find { it.id == "1" && it.name == "Liked" } ?: return
+            val existingSongs = favoritesPlaylist.songs
+            val updatedSongs = when {
+                isAdding && song != null && existingSongs.none { it.id == songId } -> existingSongs + song
+                isAdding -> existingSongs
+                else -> existingSongs.filterNot { it.id == songId }
             }
+
+            if (updatedSongs == existingSongs) return
+
+            val updatedPlaylist = favoritesPlaylist.copy(
+                songs = updatedSongs,
+                dateModified = System.currentTimeMillis()
+            )
+
+            val updatedPlaylists = playlists.map { if (it.id == "1") updatedPlaylist else it }
+            appSettings.setPlaylists(Gson().toJson(updatedPlaylists))
+            Log.d(TAG, "Updated Liked playlist: ${if (isAdding) "added" else "removed"} song $songId")
         } catch (e: Exception) {
             Log.e(TAG, "Error updating favorites playlist", e)
         }
@@ -1145,11 +1126,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             ACTION_TOGGLE_FAVORITE -> {
                 Log.d(TAG, "Widget toggle favorite action")
                 toggleCurrentSongFavorite()
-                // Update widget immediately after favorite toggle
-                serviceScope.launch {
-                    kotlinx.coroutines.delay(150) // Small delay for state update
-                    updateWidgetFromMediaItem(player.currentMediaItem)
-                }
+                updateWidgetFromMediaItem(player.currentMediaItem)
             }
             ACTION_MUTE -> {
                 Log.d(TAG, "Mute action")
@@ -1575,12 +1552,55 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                 val isFavorite = isCurrentSongFavorite()
                 val hasPrevious = player.hasPreviousMediaItem()
                 val hasNext = player.hasNextMediaItem()
+                val snapshotKey = buildString {
+                    append(song.id)
+                    append('|')
+                    append(player.isPlaying)
+                    append('|')
+                    append(hasPrevious)
+                    append('|')
+                    append(hasNext)
+                    append('|')
+                    append(isFavorite)
+                }
+
+                if (snapshotKey == lastWidgetSnapshotKey) {
+                    return
+                }
+                lastWidgetSnapshotKey = snapshotKey
+
                 WidgetUpdater.updateWidget(this, song, player.isPlaying, hasPrevious, hasNext, isFavorite)
             } else {
+                if (lastWidgetSnapshotKey == "empty|false") {
+                    return
+                }
+                lastWidgetSnapshotKey = "empty|false"
                 WidgetUpdater.updateWidget(this, null, false)
             }
         } else {
+            if (lastWidgetSnapshotKey == "empty|false") {
+                return
+            }
+            lastWidgetSnapshotKey = "empty|false"
             WidgetUpdater.updateWidget(this, null, false)
+        }
+    }
+
+    private fun playRandomFromCurrentQueue() {
+        val queueSize = player.mediaItemCount
+        if (queueSize <= 0) {
+            Log.w(TAG, "Cannot start explore playback: queue is empty")
+            return
+        }
+
+        val randomIndex = if (queueSize == 1) 0 else kotlin.random.Random.nextInt(queueSize)
+        player.seekTo(randomIndex, 0L)
+        player.playWhenReady = true
+        player.play()
+
+        serviceScope.launch {
+            delay(120)
+            updateWidgetFromMediaItem(player.currentMediaItem)
         }
     }
 

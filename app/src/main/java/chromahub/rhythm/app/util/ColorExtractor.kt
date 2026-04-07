@@ -119,7 +119,7 @@ private const val MAX_GRAYSCALE_CHANNEL_DELTA = 10
 private val extractedColorCache = LruCache<Int, Color>(32)
 
 /**
- * Utility object for extracting color palettes from album artwork using PixelPlayer's algorithm
+ * Utility object for extracting color palettes from album artwork using Rhythm's palette algorithm
  */
 object ColorExtractor {
 
@@ -127,7 +127,7 @@ object ColorExtractor {
     private val gson = Gson()
 
     /**
-     * Extract a Material 3 color palette from album artwork bitmap using PixelPlayer's algorithm
+    * Extract a Material 3 color palette from album artwork bitmap using Rhythm's palette algorithm
      * Returns null if extraction fails or bitmap is null
      */
     suspend fun extractColorsFromBitmap(
@@ -301,7 +301,7 @@ object ColorExtractor {
     }
 
     /**
-     * Score quantized colors based on PixelPlayer's algorithm
+    * Score quantized colors based on Rhythm's palette algorithm
      */
     private fun scoreQuantizedColors(
         colorsToPopulation: Map<Int, Int>,

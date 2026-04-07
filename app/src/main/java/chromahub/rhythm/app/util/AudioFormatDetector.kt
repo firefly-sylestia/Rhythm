@@ -339,7 +339,11 @@ object AudioFormatDetector {
             isDolby = primary.isDolby || fallback.isDolby,
             isDTS = primary.isDTS || fallback.isDTS,
             isHiRes = primary.isHiRes || fallback.isHiRes,
-            bitDepth = if (primary.bitDepth > 0) primary.bitDepth else fallback.bitDepth,
+            bitDepth = when {
+                primary.bitDepth <= 0 -> fallback.bitDepth
+                fallback.bitDepth > primary.bitDepth -> fallback.bitDepth
+                else -> primary.bitDepth
+            },
             sampleRateHz = if (primary.sampleRateHz > 0) primary.sampleRateHz else fallback.sampleRateHz,
             channelCount = if (primary.channelCount > 0) primary.channelCount else fallback.channelCount,
             bitrateKbps = if (primary.bitrateKbps > 0) primary.bitrateKbps else fallback.bitrateKbps,

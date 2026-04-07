@@ -69,14 +69,15 @@ class RhythmApplication : Application() {
      */
     private fun configureLeakCanary() {
         try {
-            // LeakCanary 2.x auto-configures itself, but we can customize if needed
-            // The library automatically watches Activities, Fragments, ViewModels, etc.
+            // LeakCanary 2.x auto-configures itself, but we can still apply debug-only tuning.
+            // Reflection keeps main source free from debugImplementation class references.
+            val debugConfigClass = Class.forName("chromahub.rhythm.app.debug.LeakCanaryDebugConfig")
+            val applyMethod = debugConfigClass.getDeclaredMethod("applyKnownReferenceMatchers")
+            applyMethod.invoke(null)
+
+            Log.d(TAG, "✓ LeakCanary configured (auto-init + debug matcher tuning)")
+        } catch (_: ClassNotFoundException) {
             Log.d(TAG, "✓ LeakCanary configured (auto-init)")
-            
-            // Optional: Customize LeakCanary behavior
-            // You can add custom configuration here if needed
-            // Example: LeakCanary.config = LeakCanary.config.copy(dumpHeap = true)
-            
         } catch (e: Exception) {
             Log.e(TAG, "Error configuring LeakCanary", e)
         }

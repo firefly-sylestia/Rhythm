@@ -5,6 +5,12 @@ import java.util.regex.Pattern
 
 object LyricsParser {
 
+    private const val MAX_PARSE_INPUT_CHARS = 250_000
+    private const val MAX_PARSE_LINES = 6_000
+    private const val MAX_LINE_LENGTH = 4_000
+    private const val MAX_TIMESTAMPS_PER_LINE = 80
+    private const val MAX_PARSED_LYRIC_LINES = 12_000
+
     // Enhanced regex pattern to support various LRC timestamp formats
     // Supports: [mm:ss.xx], [mm:ss:xx], [mm:ss.xxx], [mm:ss], and even [hh:mm:ss.xxx]
     private val timestampPattern = Pattern.compile("\\[(\\d{1,3}):(\\d{2})(?:[.:]?(\\d{0,3}))?\\]")
@@ -118,17 +124,32 @@ object LyricsParser {
      */
     fun parseLyrics(lrcContent: String): List<LyricLine> {
         if (lrcContent.isBlank()) return emptyList()
+
+        val boundedContent = if (lrcContent.length > MAX_PARSE_INPUT_CHARS) {
+            Log.w("LyricsParser", "Input too large (${lrcContent.length} chars). Truncating before parse.")
+            lrcContent.take(MAX_PARSE_INPUT_CHARS)
+        } else {
+            lrcContent
+        }
         
         val lyricLines = mutableListOf<LyricLine>()
-        val lines = lrcContent.trim().split("\n", "\r\n", "\r")
+        val lines = boundedContent
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .lineSequence()
+            .take(MAX_PARSE_LINES)
+            .toList()
         
         var pendingTimestamps = mutableListOf<Long>()
         val pendingTextLines = mutableListOf<String>()
 
         for (lineIndex in lines.indices) {
+            if (lyricLines.size >= MAX_PARSED_LYRIC_LINES) break
+
             val line = lines[lineIndex]
             val trimmedLine = line.trim()
             if (trimmedLine.isEmpty()) continue
+            if (trimmedLine.length > MAX_LINE_LENGTH) continue
             
             // Skip metadata lines (artist, title, album, etc.)
             if (metadataPattern.matcher(trimmedLine).find()) continue
@@ -136,9 +157,14 @@ object LyricsParser {
             val matcher = timestampPattern.matcher(trimmedLine)
             val timestamps = mutableListOf<Long>()
             var lastMatchEnd = 0
+            var timestampMatchCount = 0
 
             // Find all timestamps in the line
             while (matcher.find()) {
+                if (timestampMatchCount++ >= MAX_TIMESTAMPS_PER_LINE) {
+                    break
+                }
+
                 try {
                     val timeValue1 = matcher.group(1)?.toLongOrNull() ?: 0
                     val timeValue2 = matcher.group(2)?.toLongOrNull() ?: 0
@@ -193,6 +219,7 @@ object LyricsParser {
                     val (voiceTag, cleanedText) = extractVoiceTag(mainText)
                     
                     for (timestamp in pendingTimestamps) {
+                        if (lyricLines.size >= MAX_PARSED_LYRIC_LINES) break
                         lyricLines.add(LyricLine(timestamp, cleanedText, voiceTag, translation, romanization))
                     }
                     pendingTextLines.clear()
@@ -225,6 +252,7 @@ object LyricsParser {
             val (voiceTag, cleanedText) = extractVoiceTag(mainText)
             
             for (timestamp in pendingTimestamps) {
+                if (lyricLines.size >= MAX_PARSED_LYRIC_LINES) break
                 lyricLines.add(LyricLine(timestamp, cleanedText, voiceTag, translation, romanization))
             }
         }
@@ -263,13 +291,28 @@ object LyricsParser {
      */
     fun parseEnhancedLRC(lrcContent: String): List<EnhancedLyricLine> {
         if (lrcContent.isBlank()) return emptyList()
+
+        val boundedContent = if (lrcContent.length > MAX_PARSE_INPUT_CHARS) {
+            Log.w("LyricsParser", "Enhanced LRC input too large (${lrcContent.length} chars). Truncating before parse.")
+            lrcContent.take(MAX_PARSE_INPUT_CHARS)
+        } else {
+            lrcContent
+        }
         
         val enhancedLines = mutableListOf<EnhancedLyricLine>()
-        val lines = lrcContent.trim().split("\n", "\r\n", "\r")
+        val lines = boundedContent
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .lineSequence()
+            .take(MAX_PARSE_LINES)
+            .toList()
         
         for (line in lines) {
+            if (enhancedLines.size >= MAX_PARSED_LYRIC_LINES) break
+
             val trimmedLine = line.trim()
             if (trimmedLine.isEmpty()) continue
+            if (trimmedLine.length > MAX_LINE_LENGTH) continue
             
             // Skip metadata lines
             if (metadataPattern.matcher(trimmedLine).find()) continue
@@ -318,8 +361,13 @@ object LyricsParser {
             val wordMatcher = wordTimestampPattern.matcher(textAfterLineTimestamp)
             var lastWordEnd = 0
             var previousWordTimestamp = lineTimestamp
+            var wordTimestampCount = 0
             
             while (wordMatcher.find()) {
+                if (wordTimestampCount++ >= MAX_TIMESTAMPS_PER_LINE) {
+                    break
+                }
+
                 // Get text before this word timestamp
                 val textBeforeTimestamp = textAfterLineTimestamp.substring(lastWordEnd, wordMatcher.start()).trim()
                 

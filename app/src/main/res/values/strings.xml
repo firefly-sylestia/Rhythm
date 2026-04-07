@@ -208,6 +208,9 @@
     <string name="settings_add_folder_button">Add Folder</string>
     <string name="settings_clear_all_button_short">Clear All</string>
     <string name="settings_root">Root</string>
+    <string name="settings_scan_behavior">Scan Behavior</string>
+    <string name="settings_include_hidden_whitelisted_media">Include Hidden &amp; .nomedia Files</string>
+    <string name="settings_include_hidden_whitelisted_media_desc">When whitelist mode is active, also scan hidden and .nomedia paths inside whitelisted folders.</string>
     
     <!-- Settings - Spotify -->
     <string name="settings_spotify_api_config">Spotify API Configuration</string>
@@ -1765,20 +1768,32 @@
     <string name="settings_rhythm_guard_warning_dialog_dismiss">Ignore For Now</string>
     <string name="settings_rhythm_aura_break_dialog_title">Time For A Listening Break</string>
     <string name="settings_rhythm_guard_break_dialog_title">Time For A Listening Break</string>
-    <string name="settings_rhythm_aura_break_dialog_message">Today\'s estimated listening is %1$s, above your recommended %2$s. Pause now to reset your ears and return with safer volume.</string>
-    <string name="settings_rhythm_guard_break_dialog_message">Today\'s estimated listening is %1$s, above your recommended %2$s. Pause now to reset your ears and return with safer volume.</string>
-    <string name="settings_rhythm_aura_break_dialog_pause_only">Pause Now</string>
-    <string name="settings_rhythm_guard_break_dialog_pause_only">Pause Now</string>
-    <string name="settings_rhythm_aura_break_dialog_pause_close">Pause And Close App</string>
-    <string name="settings_rhythm_guard_break_dialog_pause_close">Pause And Close App</string>
-    <string name="settings_rhythm_aura_break_dialog_schedule_title">Schedule break and auto-resume</string>
-    <string name="settings_rhythm_guard_break_dialog_schedule_title">Schedule break and auto-resume</string>
+    <string name="settings_rhythm_aura_break_dialog_message">You\'ve listened for %1$s today (recommended %2$s). Take a short break to protect your hearing.</string>
+    <string name="settings_rhythm_guard_break_dialog_message">You\'ve listened for %1$s today (recommended %2$s). Take a short break to protect your hearing.</string>
+    <string name="settings_rhythm_aura_break_dialog_pause_only">Take a Break</string>
+    <string name="settings_rhythm_guard_break_dialog_pause_only">Take a Break</string>
+    <string name="settings_rhythm_aura_break_dialog_pause_close">Delay Break</string>
+    <string name="settings_rhythm_guard_break_dialog_pause_close">Delay Break</string>
+    <string name="settings_rhythm_aura_break_dialog_schedule_title">Break Length</string>
+    <string name="settings_rhythm_guard_break_dialog_schedule_title">Break Length</string>
+    <string name="settings_rhythm_aura_break_dialog_delay_title">Delay Length</string>
+    <string name="settings_rhythm_guard_break_dialog_delay_title">Delay Length</string>
+    <string name="settings_rhythm_aura_break_dialog_pick_time">Pick Time</string>
+    <string name="settings_rhythm_guard_break_dialog_pick_time">Pick Time</string>
+    <string name="settings_rhythm_aura_break_dialog_picker_extend_title">Choose break length</string>
+    <string name="settings_rhythm_guard_break_dialog_picker_extend_title">Choose break length</string>
+    <string name="settings_rhythm_aura_break_dialog_picker_delay_title">Choose delay length</string>
+    <string name="settings_rhythm_guard_break_dialog_picker_delay_title">Choose delay length</string>
+    <string name="settings_rhythm_aura_break_dialog_delay_action">Delay break by %1$s</string>
+    <string name="settings_rhythm_guard_break_dialog_delay_action">Delay break by %1$s</string>
     <string name="settings_rhythm_aura_break_dialog_schedule_action">Pause and resume in %1$s</string>
     <string name="settings_rhythm_guard_break_dialog_schedule_action">Pause and resume in %1$s</string>
     <string name="settings_rhythm_guard_timeout_reason_auto">Listening break triggered: today %1$s exceeds recommended %2$s.</string>
     <string name="settings_rhythm_guard_timeout_reason_manual">Listening break started</string>
     <string name="settings_rhythm_guard_resume_countdown_label">Listening Timeout</string>
     <string name="settings_rhythm_guard_resume_countdown_value">Resume in %1$s</string>
+    <string name="settings_rhythm_guard_delay_break_countdown_label">Break starts soon</string>
+    <string name="settings_rhythm_guard_start_countdown_value">Starts in %1$s</string>
     <string name="settings_rhythm_guard_snapshot_widget_above_limit">Above recommended limit</string>
     <string name="settings_rhythm_guard_snapshot_widget_within_limit">Within recommended limit</string>
     <string name="settings_rhythm_guard_snapshot_widget_load_label">Current load indicator</string>
@@ -1788,10 +1803,13 @@
     <string name="settings_rhythm_guard_health_fair">Needs attention</string>
     <string name="settings_rhythm_guard_health_risk">Risky</string>
     <string name="settings_rhythm_guard_health_off">Guard off</string>
+    <string name="settings_rhythm_guard_state_active">Rhythm Guard is Active</string>
+    <string name="settings_rhythm_guard_state_inactive">Rhythm Guard is Inactive</string>
     <string name="settings_rhythm_guard_timeout_activity_title">Listening Timeout Active</string>
     <string name="settings_rhythm_guard_timeout_activity_default_reason">Plot twist: your ears started a union and called for a snack break. Rhythm Guard paused playback so everyone can cool down.</string>
     <string name="settings_rhythm_guard_timeout_activity_comic_desc">Plot twist: your ears started a union and called for a snack break. Rhythm Guard paused playback so everyone can cool down.</string>
     <string name="settings_rhythm_guard_timeout_activity_countdown">Resume in %1$s</string>
+    <string name="settings_rhythm_guard_timeout_activity_extend">Extend break (+%1$d min)</string>
     <string name="settings_rhythm_guard_timeout_activity_exit">Exit Timeout</string>
     <string name="settings_rhythm_guard_timeout_activity_close_app">Close App</string>
     <string name="settings_rhythm_aura_off_title">Rhythm Guard is Off</string>
@@ -1876,7 +1894,7 @@
     <string name="queue_remember_shuffle_desc">Save shuffle state between app restarts</string>
     <string name="queue_playback_speed">Playback Speed</string>
     <string name="queue_playback_speed_desc">Adjust playback speed</string>
-    
+
     <!-- Gestures Settings -->
     <string name="gestures_player_swipe_dismiss">Swipe Down to Dismiss</string>
     <string name="gestures_player_swipe_dismiss_desc">Swipe down on player to close it</string>

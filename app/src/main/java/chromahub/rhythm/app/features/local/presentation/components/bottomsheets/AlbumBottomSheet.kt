@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -40,6 +41,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -50,9 +52,11 @@ import chromahub.rhythm.app.R
 import chromahub.rhythm.app.shared.data.model.Album
 import chromahub.rhythm.app.shared.data.model.Song
 import chromahub.rhythm.app.shared.data.model.AppSettings
+import chromahub.rhythm.app.shared.presentation.components.common.ExpressiveShapeTarget
 import chromahub.rhythm.app.shared.presentation.components.icons.RhythmIcons
 import chromahub.rhythm.app.features.local.presentation.components.player.PlayingEqIcon
 import chromahub.rhythm.app.shared.presentation.components.common.M3PlaceholderType
+import chromahub.rhythm.app.shared.presentation.components.common.rememberExpressiveShapeFor
 import chromahub.rhythm.app.features.local.presentation.components.player.formatDuration
 import chromahub.rhythm.app.shared.presentation.components.common.AutoScrollingTextOnDemand
 import chromahub.rhythm.app.shared.presentation.components.AudioQualityBadges
@@ -103,6 +107,34 @@ fun AlbumBottomSheet(
     val savedSortOrder by appSettings.albumSortOrder.collectAsState()
     val useHoursFormat by appSettings.useHoursInTimeFormat.collectAsState()
     val albumBottomSheetGradientBlur by appSettings.albumBottomSheetGradientBlur.collectAsState()
+    val albumArtworkShape = rememberExpressiveShapeFor(
+        target = ExpressiveShapeTarget.ALBUM_ART,
+        fallbackShape = RoundedCornerShape(24.dp)
+    )
+    val compactAlbumArtworkShape = rememberExpressiveShapeFor(
+        target = ExpressiveShapeTarget.ALBUM_ART,
+        fallbackShape = RoundedCornerShape(20.dp)
+    )
+    val songArtworkShape = rememberExpressiveShapeFor(
+        target = ExpressiveShapeTarget.SONG_ART,
+        fallbackShape = RoundedCornerShape(12.dp)
+    )
+    val tabletAlbumTitleStyle = when {
+        album.title.length >= 52 -> MaterialTheme.typography.titleLarge
+        album.title.length >= 34 -> MaterialTheme.typography.headlineSmall
+        else -> MaterialTheme.typography.headlineMedium
+    }.copy(
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface
+    )
+    val phoneAlbumTitleStyle = when {
+        album.title.length >= 44 -> MaterialTheme.typography.titleMedium
+        album.title.length >= 30 -> MaterialTheme.typography.titleLarge
+        else -> MaterialTheme.typography.headlineSmall
+    }.copy(
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface
+    )
 
     // Sort order state
     var sortOrder by remember {
@@ -334,7 +366,7 @@ fun AlbumBottomSheet(
                                             scaleX = headerScale
                                             scaleY = headerScale
                                         },
-                                    shape = RoundedCornerShape(24.dp),
+                                    shape = albumArtworkShape,
                                     shadowElevation = 16.dp,
                                     tonalElevation = 8.dp
                                 ) {
@@ -391,10 +423,7 @@ fun AlbumBottomSheet(
                                 ) {
                                     AutoScrollingTextOnDemand(
                                         text = album.title,
-                                        style = MaterialTheme.typography.headlineMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        ),
+                                        style = tabletAlbumTitleStyle,
                                         gradientEdgeColor = MaterialTheme.colorScheme.surfaceContainer,
                                         modifier = Modifier.fillMaxWidth(),
                                         enabled = true,
@@ -426,11 +455,9 @@ fun AlbumBottomSheet(
                                             )
                                         }
 
-                                        MetadataChip(
-                                            text = "${sortedSongs.size} songs",
-                                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                        )
+                                        if (album.songs.isNotEmpty()) {
+                                            AudioQualityBadges(song = album.songs.first())
+                                        }
 
                                         MetadataChip(
                                             text = formatDuration(totalDuration, useHoursFormat),
@@ -738,18 +765,12 @@ fun AlbumBottomSheet(
                                 }
 
                                     // Songs list
-                                    Surface(
+                                    Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .weight(1f)
                                             .padding(horizontal = 12.dp)
-                                            .graphicsLayer { translationY = contentOffset },
-                                        shape = RoundedCornerShape(
-                                            topStart = 28.dp,
-                                            topEnd = 28.dp
-                                        ),
-                                        color = MaterialTheme.colorScheme.surfaceContainer,
-                                        tonalElevation = 1.dp
+                                            .graphicsLayer { translationY = contentOffset }
                                     ) {
                                         if (sortedSongs.isNotEmpty()) {
                                             LazyColumn(
@@ -765,8 +786,7 @@ fun AlbumBottomSheet(
                                                     items = sortedSongs,
                                                     key = { index, song -> "album_song_${song.id}_$index" }
                                                 ) { index, song ->
-                                                    val shouldAnimate = index < 10
-                                                    var itemVisible by remember { mutableStateOf(!shouldAnimate) }
+                                                        var itemVisible by remember(song.id, index) { mutableStateOf(false) }
 
                                                     val itemAlpha by animateFloatAsState(
                                                         targetValue = if (itemVisible) 1f else 0f,
@@ -795,11 +815,9 @@ fun AlbumBottomSheet(
                                                         label = "itemScale_$index"
                                                     )
 
-                                                    if (shouldAnimate) {
-                                                        LaunchedEffect(Unit) {
-                                                            delay(50L * index + 100L)
-                                                            itemVisible = true
-                                                        }
+                                                    LaunchedEffect(song.id, index) {
+                                                        delay((35L * index).coerceAtMost(700L))
+                                                        itemVisible = true
                                                     }
 
                                                     Box(
@@ -814,6 +832,25 @@ fun AlbumBottomSheet(
                                                         ExpressiveSongItem(
                                                             song = song,
                                                             index = index + 1,
+                                                            itemShape = when {
+                                                                sortedSongs.size == 1 -> RoundedCornerShape(24.dp)
+                                                                index == 0 -> RoundedCornerShape(
+                                                                    topStart = 24.dp,
+                                                                    topEnd = 24.dp,
+                                                                    bottomStart = 6.dp,
+                                                                    bottomEnd = 6.dp
+                                                                )
+                                                                index == sortedSongs.lastIndex -> RoundedCornerShape(
+                                                                    topStart = 6.dp,
+                                                                    topEnd = 6.dp,
+                                                                    bottomStart = 24.dp,
+                                                                    bottomEnd = 24.dp
+                                                                )
+                                                                else -> RoundedCornerShape(6.dp)
+                                                            },
+                                                            baseContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                                            horizontalPadding = 4.dp,
+                                                            verticalPadding = 2.dp,
                                                             onClick = {
                                                                 onSongClick(song)
                                                                 onDismiss()
@@ -841,6 +878,7 @@ fun AlbumBottomSheet(
                                                             currentSong = currentSong,
                                                             isPlaying = isPlaying,
                                                             useHoursFormat = useHoursFormat,
+                                                            songArtShape = songArtworkShape,
                                                             haptics = haptics,
                                                             modifier = Modifier.animateItem()
                                                         )
@@ -1084,7 +1122,7 @@ fun AlbumBottomSheet(
                                             scaleX = artworkScale
                                             scaleY = artworkScale
                                         },
-                                    shape = RoundedCornerShape(20.dp),
+                                    shape = compactAlbumArtworkShape,
                                     shadowElevation = 16.dp,
                                     tonalElevation = 8.dp
                                 ) {
@@ -1169,12 +1207,9 @@ fun AlbumBottomSheet(
                                     ) {
                                         Text(
                                             text = album.title,
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface,
+                                            style = phoneAlbumTitleStyle,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
-                                            lineHeight = 28.sp,
                                             textAlign = TextAlign.Start
                                         )
                                     }
@@ -1227,24 +1262,9 @@ fun AlbumBottomSheet(
                                                 )
                                             }
 
-                                            MetadataChip(
-                                                text = "${sortedSongs.size} songs",
-                                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                            )
-                                        }
-                                    }
-
-                                    // Audio quality badges
-                                    if (album.songs.isNotEmpty()) {
-                                        AnimatedVisibility(
-                                            visible = isVisible,
-                                            enter = fadeIn(tween(400, delayMillis = 400))
-                                        ) {
-                                            AudioQualityBadges(
-                                                song = album.songs.first(),
-                                                modifier = Modifier.padding(top = 4.dp)
-                                            )
+                                            if (album.songs.isNotEmpty()) {
+                                                AudioQualityBadges(song = album.songs.first())
+                                            }
                                         }
                                     }
                                 }
@@ -1619,15 +1639,12 @@ fun AlbumBottomSheet(
                     // ═══════════════════════════════════════════════════════════════════
                     // SONGS LIST
                     // ═══════════════════════════════════════════════════════════════════
-                    Surface(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
                             .padding(horizontal = 12.dp)
-                            .graphicsLayer { translationY = contentOffset },
-                        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        tonalElevation = 1.dp
+                            .graphicsLayer { translationY = contentOffset }
                     ) {
                         if (sortedSongs.isNotEmpty()) {
                             LazyColumn(
@@ -1640,9 +1657,7 @@ fun AlbumBottomSheet(
                                     items = sortedSongs,
                                     key = { index, song -> "album_song_${song.id}_$index" }
                                 ) { index, song ->
-                                    // Staggered animation with smooth entrance for first 10 items
-                                    val shouldAnimate = index < 10
-                                    var itemVisible by remember { mutableStateOf(!shouldAnimate) }
+                                    var itemVisible by remember(song.id, index) { mutableStateOf(false) }
 
                                     // Animation progress for stagger effect
                                     val itemAlpha by animateFloatAsState(
@@ -1672,11 +1687,9 @@ fun AlbumBottomSheet(
                                         label = "itemScale_$index"
                                     )
 
-                                    if (shouldAnimate) {
-                                        LaunchedEffect(Unit) {
-                                            delay(50L * index + 100L) // Staggered delay with initial offset
-                                            itemVisible = true
-                                        }
+                                    LaunchedEffect(song.id, index) {
+                                        delay((35L * index).coerceAtMost(700L))
+                                        itemVisible = true
                                     }
 
                                     Box(
@@ -1691,6 +1704,25 @@ fun AlbumBottomSheet(
                                         ExpressiveSongItem(
                                             song = song,
                                             index = index + 1,
+                                            itemShape = when {
+                                                sortedSongs.size == 1 -> RoundedCornerShape(24.dp)
+                                                index == 0 -> RoundedCornerShape(
+                                                    topStart = 24.dp,
+                                                    topEnd = 24.dp,
+                                                    bottomStart = 6.dp,
+                                                    bottomEnd = 6.dp
+                                                )
+                                                index == sortedSongs.lastIndex -> RoundedCornerShape(
+                                                    topStart = 6.dp,
+                                                    topEnd = 6.dp,
+                                                    bottomStart = 24.dp,
+                                                    bottomEnd = 24.dp
+                                                )
+                                                else -> RoundedCornerShape(6.dp)
+                                            },
+                                            baseContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                            horizontalPadding = 4.dp,
+                                            verticalPadding = 2.dp,
                                             onClick = {
                                                 onSongClick(song)
                                                 scope.launch {
@@ -1712,6 +1744,7 @@ fun AlbumBottomSheet(
                                             currentSong = currentSong,
                                             isPlaying = isPlaying,
                                             useHoursFormat = useHoursFormat,
+                                            songArtShape = songArtworkShape,
                                             haptics = haptics,
                                             modifier = Modifier.animateItem()
                                         )
@@ -1802,7 +1835,12 @@ fun ExpressiveSongItem(
     onAddToBlacklist: () -> Unit = {},
     currentSong: Song? = null,
     isPlaying: Boolean = false,
-    useHoursFormat: Boolean = false
+    useHoursFormat: Boolean = false,
+    songArtShape: Shape = RoundedCornerShape(12.dp),
+    itemShape: Shape = RoundedCornerShape(16.dp),
+    baseContainerColor: Color = Color.Transparent,
+    horizontalPadding: Dp = 8.dp,
+    verticalPadding: Dp = 3.dp
 ) {
     val context = LocalContext.current
     var showDropdown by remember { mutableStateOf(false) }
@@ -1814,7 +1852,7 @@ fun ExpressiveSongItem(
         targetValue = when {
             isCurrentSong -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
             isPressed -> MaterialTheme.colorScheme.surfaceContainerHigh
-            else -> Color.Transparent
+            else -> baseContainerColor
         },
         animationSpec = tween(250),
         label = "containerColor"
@@ -1844,7 +1882,7 @@ fun ExpressiveSongItem(
         },
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding)
             .graphicsLayer {
                 scaleX = itemScale
                 scaleY = itemScale
@@ -1858,7 +1896,7 @@ fun ExpressiveSongItem(
                     }
                 )
             },
-        shape = RoundedCornerShape(16.dp),
+        shape = itemShape,
         color = containerColor
     ) {
         Row(
@@ -1886,7 +1924,7 @@ fun ExpressiveSongItem(
 
             // Album artwork thumbnail
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = songArtShape,
                 modifier = Modifier.size(50.dp),
                 tonalElevation = 2.dp,
                 shadowElevation = if (isCurrentSong) 4.dp else 1.dp

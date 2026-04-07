@@ -151,6 +151,8 @@ class MainActivity : ComponentActivity() {
     
     companion object {
         const val DISPLAY_AUDIO_EFFECT_CONTROL_PANEL_REQUEST = 1002
+        const val EXTRA_OPEN_PLAYER = "OPEN_PLAYER"
+        const val EXTRA_OPEN_QUEUE = "OPEN_QUEUE"
     }
     
     // Track coroutine jobs to prevent memory leaks
@@ -244,8 +246,14 @@ class MainActivity : ComponentActivity() {
                             // CrashActivity is now responsible for showing the dialog
                         }
                         
-                        // Handle intent after splash screen disappears and app is initialized
-                        if (startupIntent?.action == Intent.ACTION_VIEW && startupIntent.data != null) {
+                        // Handle startup intents after splash to ensure view models are ready.
+                        val shouldHandleStartupIntent = startupIntent?.let {
+                            (it.action == Intent.ACTION_VIEW && it.data != null) ||
+                                it.getBooleanExtra(EXTRA_OPEN_PLAYER, false) ||
+                                it.getBooleanExtra(EXTRA_OPEN_QUEUE, false)
+                        } == true
+
+                        if (shouldHandleStartupIntent) {
                             // Small delay to ensure view models are ready, then handle intent
                             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
                                 kotlinx.coroutines.delay(500)
@@ -319,9 +327,11 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "Handling intent: ${intent.action}, data: ${intent.data}")
         
         try {
-            // Check if we should open player (coming from ExternalPlaybackActivity)
-            if (intent.getBooleanExtra("OPEN_PLAYER", false)) {
-                Log.d(TAG, "Opening player from external playback activity")
+            val shouldOpenPlayer = intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)
+
+            // OPEN_PLAYER/OPEN_QUEUE are navigation hints, not content intents.
+            if (shouldOpenPlayer) {
+                Log.d(TAG, "Opening player from external shortcut intent")
                 // The player should automatically show since the song is already playing
                 // No additional action needed as the navigation will handle it
                 return

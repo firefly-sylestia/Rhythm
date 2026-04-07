@@ -35,10 +35,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -76,8 +72,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import chromahub.rhythm.app.ui.LocalMiniPlayerPadding
 import androidx.compose.runtime.Composable
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -112,6 +106,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -147,6 +142,7 @@ import chromahub.rhythm.app.util.ImageUtils
 import chromahub.rhythm.app.util.M3ImageUtils
 import chromahub.rhythm.app.util.GenreUtils
 import chromahub.rhythm.app.util.HapticUtils
+import chromahub.rhythm.app.util.ArtistSeparator
 import chromahub.rhythm.app.shared.presentation.components.common.M3PlaceholderType
 import chromahub.rhythm.app.shared.presentation.components.common.rememberExpressiveShapeFor
 import chromahub.rhythm.app.shared.presentation.components.common.ExpressiveShapeTarget
@@ -189,6 +185,8 @@ fun SearchScreen(
     var selectedCategory by remember { mutableStateOf("All") }
     var showAllSongsPage by remember { mutableStateOf(false) }
     val showKeyboardOnSearchOpen by appSettings.showKeyboardOnSearchOpen.collectAsState()
+    val artistSeparatorEnabled by appSettings.artistSeparatorEnabled.collectAsState()
+    val artistSeparatorDelimiters by appSettings.artistSeparatorDelimiters.collectAsState()
     var didAutoFocusOnEntry by remember { mutableStateOf(false) }
     
     // Filter states
@@ -269,6 +267,28 @@ fun SearchScreen(
         artists
     }
 
+    val resolveArtistFromSong: (Song) -> Artist? = remember(
+        artists,
+        artistSeparatorEnabled,
+        artistSeparatorDelimiters
+    ) {
+        { song ->
+            val delimiters = artistSeparatorDelimiters.ifBlank { "/;,+&" }
+            val artistCandidates = ArtistSeparator.splitArtists(
+                artistString = song.artist,
+                delimiters = delimiters,
+                enabled = artistSeparatorEnabled
+            )
+
+            artistCandidates.firstNotNullOfOrNull { candidate ->
+                artists.find { it.name.equals(candidate, ignoreCase = true) }
+            } ?: artists.find { it.name.equals(song.artist, ignoreCase = true) }
+                ?: artistCandidates.firstOrNull()?.takeIf { it.isNotBlank() }?.let { fallback ->
+                    Artist(id = fallback, name = fallback)
+                }
+        }
+    }
+
     val searchedArtists by remember(searchQuery, uniqueArtists) {
         derivedStateOf {
             if (searchQuery.isBlank()) emptyList()
@@ -343,6 +363,13 @@ fun SearchScreen(
     var showSongInfoSheet by remember { mutableStateOf(false) }
     
     val haptics = LocalHapticFeedback.current
+
+    val onSearchSongClick: (Song) -> Unit = { song ->
+        if (searchQuery.isNotBlank()) {
+            viewModel.addSearchQuery(searchQuery)
+        }
+        onSongClick(song)
+    }
     
     // Screen entrance animation
     var showContent by remember { mutableStateOf(false) }
@@ -725,7 +752,7 @@ fun SearchScreen(
                     showAllSongsPage -> {
                         AllSongsPage(
                             songs = filteredSongs,
-                            onSongClick = onSongClick,
+                            onSongClick = onSearchSongClick,
                             onAddSongToPlaylist = { song ->
                                 selectedSong = song
                                 showAddToPlaylistSheet = true
@@ -740,15 +767,16 @@ fun SearchScreen(
                     }
 
                     searchQuery.isEmpty() -> {
-                        val recommendedSongs = remember(viewModel) {
-                            viewModel.getRecommendedSongs().take(4)
+                        val recommendedSongs = remember(songs, recentlyPlayed) {
+                            viewModel.getRecommendedSongs().take(6)
                         }
                         DefaultSearchContent(
                             songs = songs,
+                            musicViewModel = viewModel,
                             searchHistory = searchHistory,
                             recentlyPlayed = recentlyPlayed,
                             recommendedSongs = recommendedSongs,
-                            onSongClick = onSongClick,
+                            onSongClick = onSearchSongClick,
                             onSearchQuerySelect = { query ->
                                 searchQuery = query
                                 isSearchActive = true
@@ -777,7 +805,7 @@ fun SearchScreen(
                                 playlists = filteredPlaylists,
                                 searchQuery = searchQuery,
                                 totalResults = totalResults,
-                                onSongClick = onSongClick,
+                                onSongClick = onSearchSongClick,
                                 onAlbumClick = onAlbumClick,
                                 onArtistClick = onArtistClick,
                                 onPlaylistClick = onPlaylistClick,
@@ -861,7 +889,7 @@ fun SearchScreen(
                     }
                 }
             },
-            onSongClick = onSongClick,
+            onSongClick = onSearchSongClick,
             onPlayAll = { songs -> 
                 // Play all songs from the album with proper sorting
                 if (songs.isNotEmpty()) {
@@ -976,7 +1004,7 @@ fun SearchScreen(
             },
             onGoToArtist = {
                 showSongOptionsSheet = false
-                val artist = artists.find { it.name == selectedSong!!.artist }
+                val artist = resolveArtistFromSong(selectedSong!!)
                 if (artist != null) {
                     onNavigateToArtist(artist)
                 } else {
@@ -2319,6 +2347,7 @@ private fun EnhancedRecentChip(
 @Composable
 private fun DefaultSearchContent(
     songs: List<Song>,
+    musicViewModel: MusicViewModel,
     searchHistory: List<String>,
     recentlyPlayed: List<Song>,
     recommendedSongs: List<Song>,
@@ -2544,7 +2573,7 @@ private fun DefaultSearchContent(
         item {
             GenreBrowseSection(
                 songs = songs,
-                musicViewModel = viewModel(),
+                musicViewModel = musicViewModel,
                 onGenreClick = { genre ->
                     onSearchQuerySelect(genre)
                 }
@@ -2717,51 +2746,68 @@ private fun RecommendedForYouSection(
 ) {
     val context = LocalContext.current
     if (songs.isEmpty()) return
-    
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
+    val sectionShape = RoundedCornerShape(20.dp)
+
+    Card(
+        shape = sectionShape,
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = context.getString(R.string.search_recommended),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-        }
-        
-        Surface(
-            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp)
+                .background(
+                    brush = Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f),
+                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.82f)
+                        )
+                    ),
+                    shape = sectionShape
+                )
+                .padding(16.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(
-                    text = context.getString(R.string.search_recommended_desc),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                
-                songs.forEachIndexed { index, song ->
-                    RecommendedSongItem(
-                        song = song,
-                        onClick = { onSongClick(song) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lightbulb,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(22.dp)
                     )
-                    
-                    if (index != songs.lastIndex) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                    Column {
+                        Text(
+                            text = context.getString(R.string.search_recommended),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            text = context.getString(R.string.search_recommended_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(end = 6.dp)
+                ) {
+                    items(
+                        items = songs,
+                        key = { "recommended_${it.id}" },
+                        contentType = { "recommended_song" }
+                    ) { song ->
+                        RecommendedSongItem(
+                            song = song,
+                            onClick = { onSongClick(song) }
+                        )
                     }
                 }
             }
@@ -2769,7 +2815,6 @@ private fun RecommendedForYouSection(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecommendedSongItem(
     song: Song,
@@ -2777,73 +2822,97 @@ private fun RecommendedSongItem(
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    
-    ListItem(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = {
-                HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
-                onClick()
-            })
-            .padding(vertical = 4.dp),
-        leadingContent = {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.size(48.dp)
-            ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .apply(ImageUtils.buildImageRequest(
+
+    val recommendationShape = RoundedCornerShape(20.dp)
+    val songArtShape = rememberExpressiveShapeFor(
+        target = ExpressiveShapeTarget.SONG_ART,
+        fallbackShape = RoundedCornerShape(14.dp)
+    )
+    val controlShape = CircleShape
+
+    Card(
+        onClick = {
+            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
+        shape = recommendationShape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+        ),
+        modifier = Modifier.width(220.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .apply(
+                        ImageUtils.buildImageRequest(
                             song.artworkUri,
                             song.title,
                             context.cacheDir,
                             M3PlaceholderType.TRACK
-                        ))
-                        .build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        },
-        headlineContent = {
+                        )
+                    )
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(songArtShape)
+            )
+
             Text(
                 text = song.title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface
             )
-        },
-        supportingContent = {
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        trailingContent = {
-            FilledIconButton(
-                onClick = onClick,
-                modifier = Modifier.size(36.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = RhythmIcons.Play,
-                    contentDescription = "Play",
-                    modifier = Modifier.size(20.dp)
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+
+                Surface(
+                    shape = controlShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 0.dp
+                ) {
+                    IconButton(
+                        onClick = {
+                            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
+                            onClick()
+                        },
+                        modifier = Modifier.size(34.dp),
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = RhythmIcons.Play,
+                            contentDescription = "Play",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
-        },
-        colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent
-        )
-    )
+        }
+    }
 }
 
 @Composable
@@ -3056,11 +3125,10 @@ private fun GenreBrowseSection(
     onGenreClick: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val haptics = LocalHapticFeedback.current
-    
+
     // Get genre detection state from ViewModel
     val isGenreDetectionComplete by musicViewModel.isGenreDetectionComplete.collectAsState()
-    
+
     // Extract unique genres from songs - split multi-genre strings on comma/semicolon
     val genres = remember(songs) {
         songs
@@ -3068,20 +3136,23 @@ private fun GenreBrowseSection(
             .distinctBy { it.lowercase() }
             .sortedBy { it.lowercase() }
     }
-    
+
+    val genreSongCounts = remember(genres, songs) {
+        genres.associateWith { genre ->
+            songs.count { song -> GenreUtils.matchesGenre(song.genre, genre) }
+        }
+    }
+
     // Determine actual loading state: show loading only if detection not complete AND no genres exist
     // Once detection completes, always show results (genres or empty state)
     val isActuallyLoading = !isGenreDetectionComplete && genres.isEmpty()
-    
-    // Log for debugging
-    android.util.Log.d("GenreBrowse", "State: isComplete=$isGenreDetectionComplete, genres=${genres.size}, loading=$isActuallyLoading")
-    
+
     // Always show the card, but vary the content based on state
     Card(
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -3156,57 +3227,124 @@ private fun GenreBrowseSection(
                 }
                 
                 else -> {
-                    // Show genres in a 2x2 grid layout
-                    val rowCount = (genres.size + 1) / 2 // Calculate number of rows needed
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.height((rowCount * 90).dp) // Calculate height based on rows
+                    val rows = remember(genres) { genres.chunked(2) }
+
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(
-                            items = genres,
-                            key = { "genre_$it" },
-                            contentType = { "genre" }
-                        ) { genre ->
-                            val songCount = songs.count { song ->
-                                GenreUtils.matchesGenre(song.genre, genre)
-                            }
-                            
-                            Card(
-                                onClick = {
-                                    HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
-                                    onGenreClick(genre)
-                                },
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.fillMaxWidth()
+                        rows.forEach { rowGenres ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = genre,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                rowGenres.forEach { genre ->
+                                    GenreBrowseItemCard(
+                                        genre = genre,
+                                        songCount = genreSongCounts[genre] ?: 0,
+                                        onClick = { onGenreClick(genre) },
+                                        modifier = Modifier.weight(1f)
                                     )
-                                    Text(
-                                        text = "$songCount songs",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                                    )
+                                }
+
+                                if (rowGenres.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+private fun genreIconFor(genre: String): ImageVector {
+    val normalized = genre.lowercase()
+    return when {
+        normalized.contains("hip hop") || normalized.contains("hip-hop") || normalized.contains("rap") || normalized.contains("trap") -> Icons.Default.Mic
+        normalized.contains("rock") || normalized.contains("metal") || normalized.contains("punk") || normalized.contains("grunge") -> RhythmIcons.Music.Audiotrack
+        normalized.contains("electronic") || normalized.contains("edm") || normalized.contains("house") || normalized.contains("techno") || normalized.contains("trance") || normalized.contains("synth") -> RhythmIcons.Player.Equalizer
+        normalized.contains("classical") || normalized.contains("instrumental") || normalized.contains("orchestra") || normalized.contains("opera") -> RhythmIcons.Music.Album
+        normalized.contains("jazz") || normalized.contains("blues") || normalized.contains("soul") || normalized.contains("r&b") || normalized.contains("funk") -> RhythmIcons.Music.MusicNote
+        normalized.contains("ambient") || normalized.contains("chill") || normalized.contains("lofi") || normalized.contains("lo-fi") || normalized.contains("acoustic") -> RhythmIcons.Devices.Headphones
+        normalized.contains("pop") || normalized.contains("dance") || normalized.contains("disco") || normalized.contains("k-pop") || normalized.contains("j-pop") -> RhythmIcons.Music.MusicNote
+        normalized.contains("country") || normalized.contains("folk") -> RhythmIcons.Music.Audiotrack
+        else -> RhythmIcons.Music.MusicNote
+    }
+}
+
+@Composable
+private fun GenreBrowseItemCard(
+    genre: String,
+    songCount: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+
+    val cardShape = RoundedCornerShape(18.dp)
+    val accentIndex = remember(genre) { (genre.hashCode() and 0x7fffffff) % 3 }
+    val gradientColors = when (accentIndex) {
+        0 -> listOf(
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f)
+        )
+        1 -> listOf(
+            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f),
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.68f)
+        )
+        else -> listOf(
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f),
+            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.72f)
+        )
+    }
+
+    Card(
+        onClick = {
+            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        modifier = modifier.heightIn(min = 88.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.linearGradient(gradientColors),
+                    shape = cardShape
+                )
+                .padding(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = genre,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = genreIconFor(genre),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "$songCount songs",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

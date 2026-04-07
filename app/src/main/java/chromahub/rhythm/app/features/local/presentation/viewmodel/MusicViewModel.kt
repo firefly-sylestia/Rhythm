@@ -96,6 +96,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         
         // Player control constants
         private const val REWIND_THRESHOLD_MS = 3000L // 3 seconds
+
+        // Keep manually imported lyrics bounded to avoid UI stalls and oversized cache files.
+        private const val MAX_EDITABLE_LYRICS_CHARS = 200_000
     }
 
     private val repository = MusicRepository(application)
@@ -943,8 +946,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             appSettings.rhythmGuardTimeoutUntilMs.collect { timeoutUntilMs ->
-                if (timeoutUntilMs > System.currentTimeMillis()) {
+                val timeoutActive = timeoutUntilMs > System.currentTimeMillis()
+                if (timeoutActive) {
+                    wasRhythmGuardTimeoutActive = true
                     enforceRhythmGuardTimeout(reason = "timeout lock updated")
+                } else {
+                    if (wasRhythmGuardTimeoutActive) {
+                        wasRhythmGuardTimeoutActive = false
+                    }
+                    resumePlaybackAfterRhythmGuardTimeoutIfNeeded(source = "timeout flow")
                 }
             }
         }
@@ -2760,6 +2770,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     playQueue(songs)
                     pendingQueueToPlay = null
                 }
+
+                resumePlaybackAfterRhythmGuardTimeoutIfNeeded(source = "controller connected")
             } else {
                 _serviceConnected.value = false
                 Log.e(TAG, "Failed to get media controller")
@@ -3625,8 +3637,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // Load bitmap from URI
                 val context = getApplication<Application>().applicationContext
                 val bitmap = try {
-                    val inputStream = context.contentResolver.openInputStream(artworkUri)
-                    android.graphics.BitmapFactory.decodeStream(inputStream)
+                    context.contentResolver.openInputStream(artworkUri)?.use { inputStream ->
+                        android.graphics.BitmapFactory.decodeStream(inputStream)
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to load bitmap from URI: $artworkUri", e)
                     null
@@ -3648,9 +3661,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     Log.w(TAG, "Failed to extract colors from: ${song.title}")
                 }
-                
-                // Clean up bitmap
-                bitmap.recycle()
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error extracting colors from album art", e)
@@ -4016,12 +4026,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     
     // Store pending queue to play when controller becomes available
     private var pendingQueueToPlay: List<Song>? = null
+    private var wasRhythmGuardTimeoutActive = false
+    private var shouldResumeAfterRhythmGuardTimeout = false
 
     private fun isRhythmGuardTimeoutActive(nowMs: Long = System.currentTimeMillis()): Boolean {
         return appSettings.rhythmGuardTimeoutUntilMs.value > nowMs
     }
 
     private fun enforceRhythmGuardTimeout(reason: String) {
+        val wasPlaying = mediaController?.isPlaying == true || _isPlaying.value
+        if (wasPlaying) {
+            shouldResumeAfterRhythmGuardTimeout = true
+        }
         mediaController?.let { controller ->
             if (controller.isPlaying) {
                 Log.d(TAG, "Rhythm Guard timeout active, forcing pause ($reason)")
@@ -4030,6 +4046,33 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         _isPlaying.value = false
         progressUpdateJob?.cancel()
+    }
+
+    fun pauseForRhythmGuardTimeout(reason: String) {
+        val wasPlaying = mediaController?.isPlaying == true || _isPlaying.value
+        if (wasPlaying) {
+            shouldResumeAfterRhythmGuardTimeout = true
+        }
+        Log.d(TAG, "Pausing playback for Rhythm Guard timeout ($reason), wasPlaying=$wasPlaying")
+        pauseMusic()
+    }
+
+    fun resumePlaybackAfterRhythmGuardTimeoutIfNeeded(source: String) {
+        if (isRhythmGuardTimeoutActive()) {
+            Log.d(TAG, "Skipping timeout resume from $source: timeout still active")
+            return
+        }
+        if (!shouldResumeAfterRhythmGuardTimeout) {
+            return
+        }
+        if (mediaController == null) {
+            Log.d(TAG, "Deferring timeout resume from $source: media controller not ready")
+            return
+        }
+
+        Log.d(TAG, "Resuming playback after timeout from $source")
+        shouldResumeAfterRhythmGuardTimeout = false
+        resumeMusic()
     }
 
     private fun canStartPlayback(action: String): Boolean {
@@ -5824,6 +5867,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val song = _currentSong.value
                 if (song != null) {
+                    val sanitizedLyrics = editedLyrics
+                        .replace("\uFEFF", "")
+                        .replace("\r\n", "\n")
+                        .replace("\r", "\n")
+                        .take(MAX_EDITABLE_LYRICS_CHARS)
+
+                    if (sanitizedLyrics.length < editedLyrics.length) {
+                        Log.w(TAG, "Edited lyrics were truncated to $MAX_EDITABLE_LYRICS_CHARS characters")
+                    }
+
                     val artist = song.artist
                     val title = song.title
                     
@@ -5831,12 +5884,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     _lyricsTimeOffset.value = timeOffset
                     
                     // Determine if lyrics are synced (contains timestamps)
-                    val isSynced = editedLyrics.contains(Regex("\\[\\d{2}:\\d{2}\\.\\d{2}]"))
+                    val isSynced = sanitizedLyrics.contains(Regex("\\[\\d{2}:\\d{2}\\.\\d{2}]"))
                     
                     val lyricsData = if (isSynced) {
-                        LyricsData(plainLyrics = null, syncedLyrics = editedLyrics)
+                        LyricsData(plainLyrics = null, syncedLyrics = sanitizedLyrics)
                     } else {
-                        LyricsData(plainLyrics = editedLyrics, syncedLyrics = null)
+                        LyricsData(plainLyrics = sanitizedLyrics, syncedLyrics = null)
                     }
                     
                     // Save to cache (internal storage)
