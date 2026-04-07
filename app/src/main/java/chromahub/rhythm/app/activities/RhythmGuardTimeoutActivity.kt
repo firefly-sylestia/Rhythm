@@ -87,7 +87,15 @@ class RhythmGuardTimeoutActivity : ComponentActivity() {
                     fallbackTimeoutUntilMs = timeoutUntilMs,
                     fallbackTimeoutStartedAtMs = timeoutStartedAtMs,
                     appSettings = appSettings,
-                    onExitTimeout = {
+                    onCloseScreen = {
+                        finish()
+                    },
+                    onTimeoutFinished = { completedTimeoutUntilMs ->
+                        if (completedTimeoutUntilMs > 0L) {
+                            val cooldownMinutes = appSettings.rhythmGuardPostTimeoutCooldownMinutes.value.coerceIn(1, 60)
+                            val cooldownUntil = System.currentTimeMillis() + cooldownMinutes.toLong() * 60_000L
+                            appSettings.setRhythmGuardTimeoutCooldownUntilMs(cooldownUntil)
+                        }
                         appSettings.clearRhythmGuardListeningTimeout()
                         finish()
                     }
@@ -124,12 +132,15 @@ private fun RhythmGuardTimeoutScreen(
     fallbackTimeoutUntilMs: Long,
     fallbackTimeoutStartedAtMs: Long,
     appSettings: AppSettings,
-    onExitTimeout: () -> Unit
+    onCloseScreen: () -> Unit,
+    onTimeoutFinished: (Long) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val timeoutUntilMsState by appSettings.rhythmGuardTimeoutUntilMs.collectAsState()
     val timeoutReasonState by appSettings.rhythmGuardTimeoutReason.collectAsState()
+    val timeoutStartedAtMsState by appSettings.rhythmGuardTimeoutStartedAtMs.collectAsState()
+    val defaultBreakResumeMinutes by appSettings.rhythmGuardBreakResumeMinutes.collectAsState()
     var fallbackConsumed by rememberSaveable { mutableStateOf(false) }
     val timeoutUntilMs = when {
         timeoutUntilMsState > 0L -> {
@@ -139,10 +150,13 @@ private fun RhythmGuardTimeoutScreen(
         !fallbackConsumed && fallbackTimeoutUntilMs > System.currentTimeMillis() -> fallbackTimeoutUntilMs
         else -> 0L
     }
-    val timeoutStartedAtMs = if (fallbackTimeoutStartedAtMs > 0L) {
+    val timeoutStartedAtMs = if (timeoutStartedAtMsState > 0L && timeoutStartedAtMsState < timeoutUntilMs) {
+        timeoutStartedAtMsState
+    } else if (fallbackTimeoutStartedAtMs > 0L) {
         fallbackTimeoutStartedAtMs
     } else {
-        (timeoutUntilMs - 15 * 60_000L).coerceAtLeast(0L)
+        val fallbackDurationMs = defaultBreakResumeMinutes.coerceIn(1, 180) * 60_000L
+        (timeoutUntilMs - fallbackDurationMs).coerceAtLeast(0L)
     }
 
     var remainingSeconds by remember(timeoutUntilMs) {
@@ -155,7 +169,7 @@ private fun RhythmGuardTimeoutScreen(
 
     LaunchedEffect(timeoutUntilMs) {
         if (timeoutUntilMs <= 0L) {
-            onExitTimeout()
+            onTimeoutFinished(0L)
             return@LaunchedEffect
         }
 
@@ -166,7 +180,7 @@ private fun RhythmGuardTimeoutScreen(
             delay(1000L)
         }
 
-        onExitTimeout()
+        onTimeoutFinished(timeoutUntilMs)
     }
 
     // Prevent bypassing the timeout gate via system back.
@@ -281,7 +295,7 @@ private fun RhythmGuardTimeoutScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 48.dp),
+                            .padding(bottom = 28.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
@@ -323,7 +337,7 @@ private fun RhythmGuardTimeoutScreen(
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 48.dp)
+                        .padding(bottom = 28.dp)
                 ) {
                     // App logo with glowing effect
                     AnimatedVisibility(
@@ -371,80 +385,120 @@ private fun RhythmGuardTimeoutScreen(
                 }
 
                 // Action buttons at bottom
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 32.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(bottom = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Exit timeout button
-                    val exitButtonScale = remember { Animatable(1f) }
+                    val extendMinutes = 5
                     OutlinedButton(
                         onClick = {
-                            scope.launch {
-                                exitButtonScale.animateTo(0.92f, animationSpec = tween(100))
-                                exitButtonScale.animateTo(1f, animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessHigh
-                                ))
+                            val now = System.currentTimeMillis()
+                            if (timeoutUntilMs > now) {
+                                val updatedUntil = (timeoutUntilMs + extendMinutes.toLong() * 60_000L)
+                                    .coerceAtMost(now + 24L * 60L * 60L * 1000L)
+                                val updatedReason = timeoutReasonState.ifBlank { reason }
+                                appSettings.setRhythmGuardListeningTimeout(
+                                    untilEpochMs = updatedUntil,
+                                    reason = updatedReason,
+                                    startedAtEpochMs = timeoutStartedAtMs.takeIf { it > 0L } ?: now
+                                )
                             }
-                            onExitTimeout()
                         },
                         modifier = Modifier
-                            .height(56.dp)
-                            .weight(1f)
-                            .graphicsLayer {
-                                scaleX = exitButtonScale.value
-                                scaleY = exitButtonScale.value
-                            },
+                            .fillMaxWidth()
+                            .height(52.dp),
                         shape = RoundedCornerShape(32.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                            imageVector = Icons.Filled.AccessTime,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            context.getString(R.string.settings_rhythm_guard_timeout_activity_exit),
+                            text = context.getString(
+                                R.string.settings_rhythm_guard_timeout_activity_extend,
+                                extendMinutes
+                            ),
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
 
-                    // Close app button
-                    val closeButtonScale = remember { Animatable(1f) }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                closeButtonScale.animateTo(0.92f, animationSpec = tween(100))
-                                closeButtonScale.animateTo(1f, animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessHigh
-                                ))
-                            }
-                            val activity = context as? ComponentActivity
-                            activity?.finishAffinity()
-                        },
-                        modifier = Modifier
-                            .height(56.dp)
-                            .weight(1f)
-                            .graphicsLayer {
-                                scaleX = closeButtonScale.value
-                                scaleY = closeButtonScale.value
-                            },
-                        shape = RoundedCornerShape(32.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            context.getString(R.string.settings_rhythm_guard_timeout_activity_close_app),
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        // Exit timeout button
+                        val exitButtonScale = remember { Animatable(1f) }
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    exitButtonScale.animateTo(0.92f, animationSpec = tween(100))
+                                    exitButtonScale.animateTo(1f, animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessHigh
+                                    ))
+                                }
+                                onCloseScreen()
+                            },
+                            modifier = Modifier
+                                .height(56.dp)
+                                .weight(1f)
+                                .graphicsLayer {
+                                    scaleX = exitButtonScale.value
+                                    scaleY = exitButtonScale.value
+                                },
+                            shape = RoundedCornerShape(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                context.getString(R.string.settings_rhythm_guard_timeout_activity_exit),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+
+                        // Close app button
+                        val closeButtonScale = remember { Animatable(1f) }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    closeButtonScale.animateTo(0.92f, animationSpec = tween(100))
+                                    closeButtonScale.animateTo(1f, animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessHigh
+                                    ))
+                                }
+                                val activity = context as? ComponentActivity
+                                activity?.finishAffinity()
+                            },
+                            modifier = Modifier
+                                .height(56.dp)
+                                .weight(1f)
+                                .graphicsLayer {
+                                    scaleX = closeButtonScale.value
+                                    scaleY = closeButtonScale.value
+                                },
+                            shape = RoundedCornerShape(32.dp)
+                        ) {
+                            Text(
+                                context.getString(R.string.settings_rhythm_guard_timeout_activity_close_app),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }

@@ -5542,7 +5542,7 @@ fun EnhancedRhythmGuardContent(
                 add(
                     Material3SettingsItem(
                         icon = Icons.Filled.Tune,
-                        title = { Text("Rhythm Guard Mode") },
+                        title = { Text(context.getString(R.string.onboarding_rhythm_guard_mode_title)) },
                         description = {
                             Column(
                                 modifier = Modifier

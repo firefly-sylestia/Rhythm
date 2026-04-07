@@ -17,8 +17,8 @@ android {
         applicationId = "chromahub.rhythm.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 45353950
-        versionName = "4.5.353.950"
+        versionCode = 46359963
+        versionName = "4.6.359.963 Beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -213,8 +213,8 @@ dependencies {
     implementation("androidx.mediarouter:mediarouter:1.8.1")
     
     // Ktor for HTTP server (Cast media serving)
-    implementation("io.ktor:ktor-server-core:3.4.1")
-    implementation("io.ktor:ktor-server-netty:3.4.1")
+    implementation("io.ktor:ktor-server-core:3.4.2")
+    implementation("io.ktor:ktor-server-netty:3.4.2")
     
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.7.0")

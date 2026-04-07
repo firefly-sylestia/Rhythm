@@ -243,9 +243,12 @@ private fun RhythmGuardWarningHost(
     val manualVolumeThreshold by appSettings.rhythmGuardManualVolumeThreshold.collectAsState()
     val configuredAlertThresholdMinutes by appSettings.rhythmGuardAlertThresholdMinutes.collectAsState()
     val warningTimeoutMinutes by appSettings.rhythmGuardWarningTimeoutMinutes.collectAsState()
+    val postTimeoutCooldownMinutes by appSettings.rhythmGuardPostTimeoutCooldownMinutes.collectAsState()
     val configuredBreakResumeMinutes by appSettings.rhythmGuardBreakResumeMinutes.collectAsState()
     val timeoutUntilMs by appSettings.rhythmGuardTimeoutUntilMs.collectAsState()
     val timeoutReason by appSettings.rhythmGuardTimeoutReason.collectAsState()
+    val timeoutStartedAtMsState by appSettings.rhythmGuardTimeoutStartedAtMs.collectAsState()
+    val timeoutCooldownUntilMs by appSettings.rhythmGuardTimeoutCooldownUntilMs.collectAsState()
     val dailyListeningStats by appSettings.dailyListeningStats.collectAsState()
     val songsPlayed by appSettings.songsPlayed.collectAsState()
     val listeningTime by appSettings.listeningTime.collectAsState()
@@ -270,6 +273,7 @@ private fun RhythmGuardWarningHost(
     val activeThresholdPercent = (activeThreshold * 100f).toInt().coerceIn(0, 100)
     val currentVolumePercent = (currentSystemVolume * 100f).toInt().coerceIn(0, 100)
     val isListeningTimeoutActive = timeoutUntilMs > System.currentTimeMillis()
+    val isPostTimeoutCooldownActive = timeoutCooldownUntilMs > System.currentTimeMillis()
 
     val rulesEnabled = auraMode != AppSettings.RHYTHM_GUARD_MODE_OFF && currentSong != null
     val volumeWarningEnabled = when (auraMode) {
@@ -287,6 +291,7 @@ private fun RhythmGuardWarningHost(
     val needsExposureWarning =
         rulesEnabled &&
             !isListeningTimeoutActive &&
+            !isPostTimeoutCooldownActive &&
             exposureWarningEnabled &&
             todayExposureMinutes > effectiveExposureLimitMinutes
 
@@ -337,7 +342,8 @@ private fun RhythmGuardWarningHost(
                 R.string.settings_rhythm_guard_timeout_reason_manual,
                 formattedTodayExposure,
                 formattedExposureLimit
-            )
+            ),
+            startedAtEpochMs = now
         )
         appSettings.setRhythmGuardBreakResumeMinutes(safeBreakMinutes)
         breakResumeMinutes = safeBreakMinutes
@@ -373,6 +379,7 @@ private fun RhythmGuardWarningHost(
             breakDialogState = null
             lastWarningType = null
             appSettings.clearRhythmGuardListeningTimeout()
+            appSettings.clearRhythmGuardTimeoutCooldown()
             resumeCountdownSeconds = 0L
             timeoutStartedAtMs = 0L
             pendingBreakStartAtMs = 0L
@@ -395,10 +402,18 @@ private fun RhythmGuardWarningHost(
         }
     }
 
-    LaunchedEffect(timeoutUntilMs, configuredBreakResumeMinutes, auraMode) {
+    LaunchedEffect(
+        timeoutUntilMs,
+        timeoutStartedAtMsState,
+        configuredBreakResumeMinutes,
+        postTimeoutCooldownMinutes,
+        auraMode
+    ) {
         val now = System.currentTimeMillis()
         if (timeoutUntilMs <= now) {
             if (timeoutUntilMs > 0L) {
+                val cooldownUntil = now + postTimeoutCooldownMinutes.coerceIn(1, 60) * 60_000L
+                appSettings.setRhythmGuardTimeoutCooldownUntilMs(cooldownUntil)
                 appSettings.clearRhythmGuardListeningTimeout()
                 musicViewModel.resumePlaybackAfterRhythmGuardTimeoutIfNeeded(
                     source = "timeout effect immediate-expired"
@@ -410,7 +425,9 @@ private fun RhythmGuardWarningHost(
         }
 
         musicViewModel.pauseForRhythmGuardTimeout(reason = "timeout countdown active")
-        if (timeoutStartedAtMs <= 0L || timeoutStartedAtMs >= timeoutUntilMs) {
+        if (timeoutStartedAtMsState > 0L && timeoutStartedAtMsState < timeoutUntilMs) {
+            timeoutStartedAtMs = timeoutStartedAtMsState
+        } else if (timeoutStartedAtMs <= 0L || timeoutStartedAtMs >= timeoutUntilMs) {
             timeoutStartedAtMs = timeoutUntilMs - configuredBreakResumeMinutes.coerceIn(1, 180) * 60_000L
         }
 
@@ -424,6 +441,8 @@ private fun RhythmGuardWarningHost(
 
         val timeoutExpired = timeoutUntilMs <= System.currentTimeMillis()
         if (timeoutExpired) {
+            val cooldownUntil = System.currentTimeMillis() + postTimeoutCooldownMinutes.coerceIn(1, 60) * 60_000L
+            appSettings.setRhythmGuardTimeoutCooldownUntilMs(cooldownUntil)
             appSettings.clearRhythmGuardListeningTimeout()
             musicViewModel.resumePlaybackAfterRhythmGuardTimeoutIfNeeded(
                 source = "timeout effect countdown-finished"
@@ -431,6 +450,20 @@ private fun RhythmGuardWarningHost(
         }
         resumeCountdownSeconds = 0L
         timeoutStartedAtMs = 0L
+    }
+
+    LaunchedEffect(timeoutCooldownUntilMs) {
+        val now = System.currentTimeMillis()
+        if (timeoutCooldownUntilMs <= now) {
+            if (timeoutCooldownUntilMs > 0L) {
+                appSettings.clearRhythmGuardTimeoutCooldown()
+            }
+            return@LaunchedEffect
+        }
+
+        val delayMs = (timeoutCooldownUntilMs - now).coerceAtLeast(0L)
+        delay(delayMs)
+        appSettings.clearRhythmGuardTimeoutCooldown()
     }
 
     LaunchedEffect(pendingBreakStartAtMs, pendingBreakDurationMinutes, timeoutUntilMs) {
@@ -453,12 +486,6 @@ private fun RhythmGuardWarningHost(
 
         if (shouldStartTimeout) {
             startTimeoutBreak(pendingBreakDurationMinutes)
-        }
-    }
-
-    LaunchedEffect(auraMode, auraAge) {
-        if (auraMode == AppSettings.RHYTHM_GUARD_MODE_AUTO) {
-            appSettings.applyRhythmGuardAutoProfileForAge(auraAge)
         }
     }
 
@@ -582,7 +609,11 @@ private fun RhythmGuardWarningHost(
                         timeoutStartedAtMs = now
                         lastTimeoutTriggeredExposureMinutes = todayExposureMinutes
                         appSettings.setRhythmGuardBreakResumeMinutes(safeBreakMinutes)
-                        appSettings.setRhythmGuardListeningTimeout(timeoutEnd, reason)
+                        appSettings.setRhythmGuardListeningTimeout(
+                            untilEpochMs = timeoutEnd,
+                            reason = reason,
+                            startedAtEpochMs = now
+                        )
                         musicViewModel.pauseForRhythmGuardTimeout(reason = "auto break start")
                         RhythmGuardTimeoutActivity.start(
                             context = context,
@@ -873,19 +904,31 @@ private fun RhythmGuardWarningHost(
     val timeoutElapsedSeconds = (timeoutTotalSeconds - resumeCountdownSeconds.toFloat()).coerceAtLeast(0f)
     val timeoutProgress = (timeoutElapsedSeconds / timeoutTotalSeconds).coerceIn(0f, 1f)
     val pendingStartProgress = ((60f - pendingBreakStartCountdownSeconds.toFloat()) / 60f).coerceIn(0f, 1f)
-    val bubbleCountdownSeconds = if (isTimeoutBubbleActive) resumeCountdownSeconds else pendingBreakStartCountdownSeconds
-    val bubbleProgress = if (isTimeoutBubbleActive) timeoutProgress else pendingStartProgress
+    val bubbleCountdownSeconds = if (isTimeoutBubbleActive) {
+        resumeCountdownSeconds
+    } else {
+        pendingBreakStartCountdownSeconds
+    }
+    val bubbleProgress = if (isTimeoutBubbleActive) {
+        timeoutProgress
+    } else {
+        pendingStartProgress
+    }
     val bubbleLabel = if (isTimeoutBubbleActive) {
         if (timeoutReason.isNotBlank()) timeoutReason else context.getString(
             R.string.settings_rhythm_guard_resume_countdown_label
         )
-    } else {
+    } else if (isPendingStartBubbleActive) {
         context.getString(R.string.settings_rhythm_guard_delay_break_countdown_label)
+    } else {
+        ""
     }
     val bubbleValueResId = if (isTimeoutBubbleActive) {
         R.string.settings_rhythm_guard_resume_countdown_value
-    } else {
+    } else if (isPendingStartBubbleActive) {
         R.string.settings_rhythm_guard_start_countdown_value
+    } else {
+        R.string.settings_rhythm_guard_resume_countdown_value
     }
     val density = androidx.compose.ui.platform.LocalDensity.current
 

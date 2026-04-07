@@ -539,6 +539,26 @@ fun buildSettingsSearchIndex(context: Context): List<SearchableSettingItem> {
             settingKey = "rhythmGuardWarningTimeoutMinutes"
         ))
         add(SearchableSettingItem(
+            id = "rhythm_guard_post_timeout_cooldown",
+            title = context.getString(R.string.settings_rhythm_guard_post_timeout_cooldown_search_title),
+            description = context.getString(R.string.settings_rhythm_guard_post_timeout_cooldown_search_desc),
+            keywords = listOf("post-timeout", "recovery cooldown", "timeout cooldown", "break cooldown"),
+            icon = Icons.Default.AccessTime,
+            route = SettingsRoutes.RHYTHM_GUARD,
+            parentScreen = context.getString(R.string.settings_rhythm_guard),
+            settingKey = "rhythmGuardPostTimeoutCooldownMinutes"
+        ))
+        add(SearchableSettingItem(
+            id = "rhythm_guard_protection_presets",
+            title = context.getString(R.string.settings_rhythm_guard_protection_presets_search_title),
+            description = context.getString(R.string.settings_rhythm_guard_protection_presets_search_desc),
+            keywords = listOf("preset", "strict", "balanced", "gentle", "quick setup", "guard profile"),
+            icon = Icons.Default.Security,
+            route = SettingsRoutes.RHYTHM_GUARD,
+            parentScreen = context.getString(R.string.settings_rhythm_guard),
+            settingKey = "rhythmGuardProtectionPreset"
+        ))
+        add(SearchableSettingItem(
             id = "rhythm_guard_break_resume",
             title = context.getString(R.string.settings_rhythm_guard_break_resume_search_title),
             description = context.getString(R.string.settings_rhythm_guard_break_resume_search_desc),

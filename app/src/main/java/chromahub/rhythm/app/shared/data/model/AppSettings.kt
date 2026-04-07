@@ -179,9 +179,12 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_RHYTHM_GUARD_LAST_AUTO_APPLIED_AT = "rhythm_guard_last_auto_applied_at"
         private const val KEY_RHYTHM_GUARD_ALERT_THRESHOLD_MINUTES = "rhythm_guard_alert_threshold_minutes"
         private const val KEY_RHYTHM_GUARD_WARNING_TIMEOUT_MINUTES = "rhythm_guard_warning_timeout_minutes"
+        private const val KEY_RHYTHM_GUARD_POST_TIMEOUT_COOLDOWN_MINUTES = "rhythm_guard_post_timeout_cooldown_minutes"
         private const val KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES = "rhythm_guard_break_resume_minutes"
         private const val KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS = "rhythm_guard_timeout_until_ms"
         private const val KEY_RHYTHM_GUARD_TIMEOUT_REASON = "rhythm_guard_timeout_reason"
+        private const val KEY_RHYTHM_GUARD_TIMEOUT_STARTED_AT_MS = "rhythm_guard_timeout_started_at_ms"
+        private const val KEY_RHYTHM_GUARD_TIMEOUT_COOLDOWN_UNTIL_MS = "rhythm_guard_timeout_cooldown_until_ms"
 
         // Legacy keys kept for migration compatibility.
         private const val KEY_RHYTHM_AURA_MODE = "rhythm_aura_mode"
@@ -966,6 +969,11 @@ class AppSettings private constructor(context: Context) {
     )
     val rhythmGuardWarningTimeoutMinutes: StateFlow<Int> = _rhythmGuardWarningTimeoutMinutes.asStateFlow()
 
+    private val _rhythmGuardPostTimeoutCooldownMinutes = MutableStateFlow(
+        prefs.getInt(KEY_RHYTHM_GUARD_POST_TIMEOUT_COOLDOWN_MINUTES, 10).coerceIn(1, 60)
+    )
+    val rhythmGuardPostTimeoutCooldownMinutes: StateFlow<Int> = _rhythmGuardPostTimeoutCooldownMinutes.asStateFlow()
+
     private val _rhythmGuardBreakResumeMinutes = MutableStateFlow(
         prefs.getInt(KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES, 15).coerceIn(1, 180)
     )
@@ -980,6 +988,16 @@ class AppSettings private constructor(context: Context) {
         prefs.getString(KEY_RHYTHM_GUARD_TIMEOUT_REASON, null).orEmpty()
     )
     val rhythmGuardTimeoutReason: StateFlow<String> = _rhythmGuardTimeoutReason.asStateFlow()
+
+    private val _rhythmGuardTimeoutStartedAtMs = MutableStateFlow(
+        safeLong(KEY_RHYTHM_GUARD_TIMEOUT_STARTED_AT_MS, 0L).coerceAtLeast(0L)
+    )
+    val rhythmGuardTimeoutStartedAtMs: StateFlow<Long> = _rhythmGuardTimeoutStartedAtMs.asStateFlow()
+
+    private val _rhythmGuardTimeoutCooldownUntilMs = MutableStateFlow(
+        safeLong(KEY_RHYTHM_GUARD_TIMEOUT_COOLDOWN_UNTIL_MS, 0L).coerceAtLeast(0L)
+    )
+    val rhythmGuardTimeoutCooldownUntilMs: StateFlow<Long> = _rhythmGuardTimeoutCooldownUntilMs.asStateFlow()
     
     private val _uniqueArtists = MutableStateFlow(prefs.getInt(KEY_UNIQUE_ARTISTS, 0))
     val uniqueArtists: StateFlow<Int> = _uniqueArtists.asStateFlow()
@@ -2007,6 +2025,10 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             .putString(KEY_RHYTHM_AURA_MODE, normalizedMode)
             .apply()
         _rhythmAuraMode.value = normalizedMode
+
+        if (normalizedMode == RHYTHM_GUARD_MODE_AUTO) {
+            applyRhythmGuardAutoProfileForAge(_rhythmAuraAge.value)
+        }
     }
 
     @Deprecated("Use setRhythmGuardMode")
@@ -2019,6 +2041,10 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             .putInt(KEY_RHYTHM_AURA_AGE, safeAge)
             .apply()
         _rhythmAuraAge.value = safeAge
+
+        if (_rhythmAuraMode.value == RHYTHM_GUARD_MODE_AUTO) {
+            applyRhythmGuardAutoProfileForAge(safeAge)
+        }
     }
 
     @Deprecated("Use setRhythmGuardAge")
@@ -2070,25 +2096,67 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         _rhythmGuardWarningTimeoutMinutes.value = safeMinutes
     }
 
+    fun setRhythmGuardPostTimeoutCooldownMinutes(minutes: Int) {
+        val safeMinutes = minutes.coerceIn(1, 60)
+        prefs.edit().putInt(KEY_RHYTHM_GUARD_POST_TIMEOUT_COOLDOWN_MINUTES, safeMinutes).apply()
+        _rhythmGuardPostTimeoutCooldownMinutes.value = safeMinutes
+    }
+
     fun setRhythmGuardBreakResumeMinutes(minutes: Int) {
         val safeMinutes = minutes.coerceIn(1, 180)
         prefs.edit().putInt(KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES, safeMinutes).apply()
         _rhythmGuardBreakResumeMinutes.value = safeMinutes
     }
 
-    fun setRhythmGuardListeningTimeout(untilEpochMs: Long, reason: String = "") {
+    fun setRhythmGuardListeningTimeout(
+        untilEpochMs: Long,
+        reason: String = "",
+        startedAtEpochMs: Long = System.currentTimeMillis()
+    ) {
         val safeUntil = untilEpochMs.coerceAtLeast(0L)
         val safeReason = reason.trim()
-        prefs.edit()
+        val safeStartedAt = when {
+            safeUntil <= 0L -> 0L
+            startedAtEpochMs <= 0L -> System.currentTimeMillis().coerceAtMost(safeUntil)
+            else -> startedAtEpochMs.coerceAtMost(safeUntil)
+        }.coerceAtLeast(0L)
+        val editor = prefs.edit()
             .putLong(KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS, safeUntil)
             .putString(KEY_RHYTHM_GUARD_TIMEOUT_REASON, safeReason)
-            .apply()
+            .putLong(KEY_RHYTHM_GUARD_TIMEOUT_STARTED_AT_MS, safeStartedAt)
+
+        if (safeUntil > 0L) {
+            editor.putLong(KEY_RHYTHM_GUARD_TIMEOUT_COOLDOWN_UNTIL_MS, 0L)
+        }
+
+        editor.apply()
         _rhythmGuardTimeoutUntilMs.value = safeUntil
         _rhythmGuardTimeoutReason.value = safeReason
+        _rhythmGuardTimeoutStartedAtMs.value = safeStartedAt
+        if (safeUntil > 0L) {
+            _rhythmGuardTimeoutCooldownUntilMs.value = 0L
+        }
     }
 
     fun clearRhythmGuardListeningTimeout() {
-        setRhythmGuardListeningTimeout(0L, "")
+        prefs.edit()
+            .putLong(KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS, 0L)
+            .putString(KEY_RHYTHM_GUARD_TIMEOUT_REASON, "")
+            .putLong(KEY_RHYTHM_GUARD_TIMEOUT_STARTED_AT_MS, 0L)
+            .apply()
+        _rhythmGuardTimeoutUntilMs.value = 0L
+        _rhythmGuardTimeoutReason.value = ""
+        _rhythmGuardTimeoutStartedAtMs.value = 0L
+    }
+
+    fun setRhythmGuardTimeoutCooldownUntilMs(untilEpochMs: Long) {
+        val safeUntil = untilEpochMs.coerceAtLeast(0L)
+        prefs.edit().putLong(KEY_RHYTHM_GUARD_TIMEOUT_COOLDOWN_UNTIL_MS, safeUntil).apply()
+        _rhythmGuardTimeoutCooldownUntilMs.value = safeUntil
+    }
+
+    fun clearRhythmGuardTimeoutCooldown() {
+        setRhythmGuardTimeoutCooldownUntilMs(0L)
     }
 
     fun isRhythmGuardTimeoutActive(nowMs: Long = System.currentTimeMillis()): Boolean {
@@ -2137,7 +2205,6 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         val safeAge = age.coerceIn(8, 80)
         val policy = getRhythmGuardPolicy(safeAge)
 
-        setRhythmGuardManualVolumeThreshold(policy.maxVolumeThreshold)
         setAudioNormalization(true)
         setReplayGain(true)
         setUseSystemVolume(true)
@@ -3015,7 +3082,18 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             key == KEY_PINNED_FOLDERS
     }
 
+    private fun isRhythmGuardTransientRuntimeKey(key: String): Boolean {
+        return key == KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS ||
+            key == KEY_RHYTHM_GUARD_TIMEOUT_REASON ||
+            key == KEY_RHYTHM_GUARD_TIMEOUT_STARTED_AT_MS ||
+            key == KEY_RHYTHM_GUARD_TIMEOUT_COOLDOWN_UNTIL_MS
+    }
+
     private fun isStatsAndRhythmGuardBackupKey(key: String): Boolean {
+        if (isRhythmGuardTransientRuntimeKey(key)) {
+            return false
+        }
+
         return key == KEY_LAST_PLAYED_TIMESTAMP ||
             key == KEY_RECENTLY_PLAYED ||
             key == KEY_LISTENING_TIME ||
@@ -3036,8 +3114,6 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             key == KEY_RHYTHM_GUARD_ALERT_THRESHOLD_MINUTES ||
             key == KEY_RHYTHM_GUARD_WARNING_TIMEOUT_MINUTES ||
             key == KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES ||
-            key == KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS ||
-            key == KEY_RHYTHM_GUARD_TIMEOUT_REASON ||
             key == KEY_RHYTHM_AURA_MODE ||
             key == KEY_RHYTHM_AURA_AGE ||
             key.startsWith("rhythm_guard_") ||
@@ -3048,6 +3124,10 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         key: String,
         sections: BackupRestoreSections
     ): Boolean {
+        if (isRhythmGuardTransientRuntimeKey(key)) {
+            return false
+        }
+
         return when {
             isLibraryBackupKey(key) -> sections.includeLibraryData
             isStatsAndRhythmGuardBackupKey(key) -> sections.includeStatsAndRhythmGuard
@@ -3219,7 +3299,7 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             
             // Restore all preferences with proper type handling
             preferences.forEach { (key, value) ->
-                if (!shouldIncludeKeyInBackupSections(key, sections)) {
+                if (!shouldIncludeKeyInBackupSections(key, sections) || isRhythmGuardTransientRuntimeKey(key)) {
                     return@forEach
                 }
 
@@ -3244,7 +3324,7 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
                     ?: emptyMap()
 
                 statsData.forEach { (key, value) ->
-                    if (isStatsAndRhythmGuardBackupKey(key)) {
+                    if (isStatsAndRhythmGuardBackupKey(key) && !isRhythmGuardTransientRuntimeKey(key)) {
                         applyBackupPreferenceValue(editor, key, value, statsTypes[key] ?: preferencesTypes[key])
                     }
                 }
@@ -3308,6 +3388,8 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
             
             // Refresh all StateFlows to reflect the restored data
             refreshAllStateFlows()
+            clearRhythmGuardListeningTimeout()
+            clearRhythmGuardTimeoutCooldown()
             
             Log.d("AppSettings", "Backup restoration completed successfully")
             true
@@ -3530,9 +3612,12 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
         )
         _rhythmGuardAlertThresholdMinutes.value = prefs.getInt(KEY_RHYTHM_GUARD_ALERT_THRESHOLD_MINUTES, -1).coerceIn(-1, 24 * 60)
         _rhythmGuardWarningTimeoutMinutes.value = prefs.getInt(KEY_RHYTHM_GUARD_WARNING_TIMEOUT_MINUTES, 2).coerceIn(1, 60)
+        _rhythmGuardPostTimeoutCooldownMinutes.value = prefs.getInt(KEY_RHYTHM_GUARD_POST_TIMEOUT_COOLDOWN_MINUTES, 10).coerceIn(1, 60)
         _rhythmGuardBreakResumeMinutes.value = prefs.getInt(KEY_RHYTHM_GUARD_BREAK_RESUME_MINUTES, 15).coerceIn(1, 180)
         _rhythmGuardTimeoutUntilMs.value = safeLong(KEY_RHYTHM_GUARD_TIMEOUT_UNTIL_MS, 0L).coerceAtLeast(0L)
         _rhythmGuardTimeoutReason.value = prefs.getString(KEY_RHYTHM_GUARD_TIMEOUT_REASON, null).orEmpty()
+        _rhythmGuardTimeoutStartedAtMs.value = safeLong(KEY_RHYTHM_GUARD_TIMEOUT_STARTED_AT_MS, 0L).coerceAtLeast(0L)
+        _rhythmGuardTimeoutCooldownUntilMs.value = safeLong(KEY_RHYTHM_GUARD_TIMEOUT_COOLDOWN_UNTIL_MS, 0L).coerceAtLeast(0L)
         
         // Enhanced User Preferences
         _favoriteGenres.value = try {

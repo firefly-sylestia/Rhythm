@@ -6512,7 +6512,11 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
     val manualVolumeThreshold by appSettings.rhythmGuardManualVolumeThreshold.collectAsState()
     val alertThresholdMinutes by appSettings.rhythmGuardAlertThresholdMinutes.collectAsState()
     val warningTimeoutMinutes by appSettings.rhythmGuardWarningTimeoutMinutes.collectAsState()
+    val postTimeoutCooldownMinutes by appSettings.rhythmGuardPostTimeoutCooldownMinutes.collectAsState()
     val breakResumeMinutes by appSettings.rhythmGuardBreakResumeMinutes.collectAsState()
+    val timeoutUntilMs by appSettings.rhythmGuardTimeoutUntilMs.collectAsState()
+    val timeoutStartedAtMs by appSettings.rhythmGuardTimeoutStartedAtMs.collectAsState()
+    val timeoutCooldownUntilMs by appSettings.rhythmGuardTimeoutCooldownUntilMs.collectAsState()
 
     val dailyListeningStats by appSettings.dailyListeningStats.collectAsState()
 
@@ -6535,6 +6539,20 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
         todayExposureMs = todaySummary?.totalDurationMs ?: 0L
         weeklyAverageSessions = weekSummary?.averageSessionsPerDay
             ?: rhythmGuardWeeklyAverageSessions(dailyListeningStats)
+    }
+
+    val nowEpochMs by produceState(
+        initialValue = System.currentTimeMillis(),
+        key1 = timeoutUntilMs,
+        key2 = timeoutCooldownUntilMs
+    ) {
+        while (true) {
+            value = System.currentTimeMillis()
+            val timeoutActive = timeoutUntilMs > value
+            val cooldownActive = timeoutCooldownUntilMs > value
+            if (!timeoutActive && !cooldownActive) break
+            delay(1000L)
+        }
     }
 
     val activePolicy = remember(auraAge) { appSettings.getRhythmGuardPolicy(auraAge) }
@@ -6563,6 +6581,9 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
     val formattedTimeout = remember(warningTimeoutMinutes) {
         rhythmGuardFormatDurationFromMinutes(warningTimeoutMinutes)
     }
+    val formattedPostTimeoutCooldown = remember(postTimeoutCooldownMinutes) {
+        rhythmGuardFormatDurationFromMinutes(postTimeoutCooldownMinutes)
+    }
     val formattedResumeInterval = remember(breakResumeMinutes) {
         rhythmGuardFormatDurationFromMinutes(breakResumeMinutes)
     }
@@ -6576,6 +6597,24 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
     } else {
         manualThresholdPercent
     }
+    val isTimeoutActive = isRhythmGuardEnabled && timeoutUntilMs > nowEpochMs
+    val isCooldownActive = isRhythmGuardEnabled && !isTimeoutActive && timeoutCooldownUntilMs > nowEpochMs
+    val timeoutRemainingSeconds = ((timeoutUntilMs - nowEpochMs) / 1000L).coerceAtLeast(0L)
+    val cooldownRemainingSeconds = ((timeoutCooldownUntilMs - nowEpochMs) / 1000L).coerceAtLeast(0L)
+
+    val timeoutStartFallbackMs = timeoutUntilMs - breakResumeMinutes.coerceIn(1, 180).toLong() * 60_000L
+    val resolvedTimeoutStartMs = timeoutStartedAtMs
+        .takeIf { it > 0L && it < timeoutUntilMs }
+        ?: timeoutStartFallbackMs
+    val timeoutTotalMs = (timeoutUntilMs - resolvedTimeoutStartMs).coerceAtLeast(1_000L)
+    val timeoutElapsedMs = (timeoutTotalMs - (timeoutUntilMs - nowEpochMs).coerceAtLeast(0L))
+        .coerceIn(0L, timeoutTotalMs)
+    val timeoutProgress = (timeoutElapsedMs.toFloat() / timeoutTotalMs.toFloat()).coerceIn(0f, 1f)
+
+    val cooldownTotalMs = postTimeoutCooldownMinutes.coerceIn(1, 60).toLong() * 60_000L
+    val cooldownElapsedMs = (cooldownTotalMs - (timeoutCooldownUntilMs - nowEpochMs).coerceAtLeast(0L))
+        .coerceIn(0L, cooldownTotalMs)
+    val cooldownProgress = (cooldownElapsedMs.toFloat() / cooldownTotalMs.toFloat()).coerceIn(0f, 1f)
 
     val showVolumeWarning = isRhythmGuardEnabled &&
         auraMode == AppSettings.RHYTHM_GUARD_MODE_MANUAL &&
@@ -6583,37 +6622,95 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
         currentSystemVolume > manualVolumeThreshold
     val showExposureWarning = isRhythmGuardEnabled &&
         auraMode == AppSettings.RHYTHM_GUARD_MODE_MANUAL &&
+        manualWarningsEnabled &&
         totalExposureMinutes > effectiveExposureLimitMinutes
-    val volumeLoadRatio = (currentSystemVolume / maxOf(activeVolumeThreshold, 0.01f)).coerceAtLeast(0f)
-    val exposureLoadRatio = (totalExposureMinutes / maxOf(effectiveExposureLimitMinutes, 1).toFloat()).coerceAtLeast(0f)
-    val sessionLoadRatio = (weeklyAverageSessions / 8f).coerceAtLeast(0f)
-    val healthRiskScore = if (isRhythmGuardEnabled) {
-        (
-            (volumeLoadRatio * 0.45f) +
-                (exposureLoadRatio * 0.45f) +
-                (sessionLoadRatio * 0.10f) +
-                if (auraMode == AppSettings.RHYTHM_GUARD_MODE_MANUAL && !manualWarningsEnabled) 0.08f else 0f
-            ).coerceIn(0f, 1.5f)
-    } else {
-        0f
+    val safetySnapshot = remember(
+        isRhythmGuardEnabled,
+        auraMode,
+        manualWarningsEnabled,
+        currentSystemVolume,
+        activeVolumeThreshold,
+        totalExposureMinutes,
+        effectiveExposureLimitMinutes,
+        weeklyAverageSessions,
+        isTimeoutActive,
+        isCooldownActive,
+        cooldownProgress
+    ) {
+        rhythmGuardCalculateSafetySnapshot(
+            isEnabled = isRhythmGuardEnabled,
+            isManualMode = auraMode == AppSettings.RHYTHM_GUARD_MODE_MANUAL,
+            manualWarningsEnabled = manualWarningsEnabled,
+            currentVolumeFraction = currentSystemVolume,
+            safeVolumeThresholdFraction = activeVolumeThreshold,
+            exposureMinutes = totalExposureMinutes,
+            exposureLimitMinutes = effectiveExposureLimitMinutes,
+            weeklyAverageSessions = weeklyAverageSessions,
+            timeoutActive = isTimeoutActive,
+            cooldownActive = isCooldownActive,
+            cooldownProgress = cooldownProgress
+        )
     }
+    val healthRiskScore = safetySnapshot.riskScore
+    val safetyScorePercent = (safetySnapshot.safetyProgress * 100f).toInt().coerceIn(0, 100)
     val overallHealthLevel = when {
         !isRhythmGuardEnabled -> RhythmGuardOverallHealthLevel.OFF
-        healthRiskScore < 0.72f -> RhythmGuardOverallHealthLevel.GOOD
-        healthRiskScore < 1.0f -> RhythmGuardOverallHealthLevel.FAIR
+        isTimeoutActive -> RhythmGuardOverallHealthLevel.TIMEOUT
+        isCooldownActive -> RhythmGuardOverallHealthLevel.COOLDOWN
+        healthRiskScore < 0.40f -> RhythmGuardOverallHealthLevel.GOOD
+        healthRiskScore < 0.72f -> RhythmGuardOverallHealthLevel.FAIR
         else -> RhythmGuardOverallHealthLevel.RISK
     }
-    val overallHealthProgress = if (isRhythmGuardEnabled) {
-        (1f - healthRiskScore.coerceIn(0f, 1f)).coerceIn(0f, 1f)
-    } else {
-        0f
+    val overallHealthProgress = when {
+        !isRhythmGuardEnabled -> 0f
+        isTimeoutActive -> timeoutProgress
+        isCooldownActive -> cooldownProgress
+        else -> safetySnapshot.safetyProgress
     }
-    LaunchedEffect(auraMode, auraAge) {
-        if (auraMode == AppSettings.RHYTHM_GUARD_MODE_AUTO) {
-            appSettings.applyRhythmGuardAutoProfileForAge(auraAge)
-        }
+    val guardStatusText = when {
+        !isRhythmGuardEnabled -> context.getString(R.string.settings_rhythm_guard_state_inactive)
+        isTimeoutActive -> context.getString(R.string.settings_rhythm_guard_state_timeout_active)
+        isCooldownActive -> context.getString(R.string.settings_rhythm_guard_state_cooldown_active)
+        else -> context.getString(R.string.settings_rhythm_guard_state_active)
     }
-
+    val guardStatusDetail = when {
+        isTimeoutActive -> context.getString(
+            R.string.settings_rhythm_guard_state_timeout_remaining,
+            rhythmGuardFormatCountdownFromSeconds(timeoutRemainingSeconds)
+        )
+        isCooldownActive -> context.getString(
+            R.string.settings_rhythm_guard_state_cooldown_remaining,
+            rhythmGuardFormatCountdownFromSeconds(cooldownRemainingSeconds)
+        )
+        isRhythmGuardEnabled -> context.getString(
+            R.string.settings_rhythm_guard_state_safety_score,
+            safetyScorePercent
+        )
+        else -> null
+    }
+    val guardStatusAccentColor = when {
+        isCooldownActive -> Color(0xFF1565C0)
+        isTimeoutActive -> MaterialTheme.colorScheme.error
+        isRhythmGuardEnabled -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val activeManualPreset = remember(
+        manualVolumeThreshold,
+        alertThresholdMinutes,
+        warningTimeoutMinutes,
+        postTimeoutCooldownMinutes,
+        breakResumeMinutes,
+        manualWarningsEnabled
+    ) {
+        rhythmGuardResolveProtectionPreset(
+            manualVolumeThreshold = manualVolumeThreshold,
+            alertThresholdMinutes = alertThresholdMinutes,
+            warningTimeoutMinutes = warningTimeoutMinutes,
+            postTimeoutCooldownMinutes = postTimeoutCooldownMinutes,
+            breakResumeMinutes = breakResumeMinutes,
+            manualWarningsEnabled = manualWarningsEnabled
+        )
+    }
     CollapsibleHeaderScreen(
         title = context.getString(R.string.settings_rhythm_guard),
         showBackButton = true,
@@ -6634,7 +6731,8 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
                 RhythmGuardOverallHealthCard(
                     level = overallHealthLevel,
                     progress = overallHealthProgress,
-                    isEnabled = isRhythmGuardEnabled,
+                    statusText = guardStatusText,
+                    statusDetail = guardStatusDetail,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -6696,7 +6794,7 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
                                         imageVector = Icons.Default.Security,
                                         contentDescription = null,
                                         modifier = Modifier.size(24.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        tint = guardStatusAccentColor
                                     )
                                 }
                             }
@@ -6713,13 +6811,9 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = if (isRhythmGuardEnabled) {
-                                        context.getString(R.string.label_enabled)
-                                    } else {
-                                        context.getString(R.string.label_disabled)
-                                    },
+                                    text = guardStatusText,
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = guardStatusAccentColor
                                 )
                             }
 
@@ -6890,6 +6984,35 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
                             )
                         }
 
+                        // Post-timeout cooldown control
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = context.getString(
+                                    R.string.settings_rhythm_guard_post_timeout_cooldown_title,
+                                    formattedPostTimeoutCooldown
+                                ),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(3, 5, 10, 15).forEach { option ->
+                                    FilterChip(
+                                        selected = postTimeoutCooldownMinutes == option,
+                                        onClick = { appSettings.setRhythmGuardPostTimeoutCooldownMinutes(option) },
+                                        label = { Text(rhythmGuardFormatDurationFromMinutes(option)) }
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = postTimeoutCooldownMinutes.toFloat(),
+                                onValueChange = { appSettings.setRhythmGuardPostTimeoutCooldownMinutes(it.toInt()) },
+                                valueRange = 1f..30f,
+                                steps = 28
+                            )
+                        }
+
                         // Break interval control
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
@@ -6917,6 +7040,52 @@ fun RhythmGuardSettingsScreen(onBackClick: () -> Unit) {
                                 valueRange = 1f..120f,
                                 steps = 118
                             )
+                        }
+
+                        // Manual protection presets (quick multi-setting tunes)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = context.getString(R.string.settings_rhythm_guard_protection_presets_title),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Text(
+                                text = context.getString(R.string.settings_rhythm_guard_protection_presets_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    RhythmGuardProtectionPreset.GENTLE,
+                                    RhythmGuardProtectionPreset.BALANCED,
+                                    RhythmGuardProtectionPreset.STRICT
+                                ).forEach { preset ->
+                                    FilterChip(
+                                        selected = activeManualPreset == preset,
+                                        onClick = {
+                                            val values = rhythmGuardPresetValues(preset)
+                                            appSettings.setRhythmGuardManualWarningsEnabled(true)
+                                            appSettings.setRhythmGuardManualVolumeThreshold(values.volumeThreshold)
+                                            appSettings.setRhythmGuardAlertThresholdMinutes(values.alertThresholdMinutes)
+                                            appSettings.setRhythmGuardWarningTimeoutMinutes(values.warningTimeoutMinutes)
+                                            appSettings.setRhythmGuardPostTimeoutCooldownMinutes(values.postTimeoutCooldownMinutes)
+                                            appSettings.setRhythmGuardBreakResumeMinutes(values.breakResumeMinutes)
+                                        },
+                                        label = {
+                                            Text(
+                                                text = when (preset) {
+                                                    RhythmGuardProtectionPreset.GENTLE -> context.getString(R.string.settings_rhythm_guard_protection_preset_gentle)
+                                                    RhythmGuardProtectionPreset.BALANCED -> context.getString(R.string.settings_rhythm_guard_protection_preset_balanced)
+                                                    RhythmGuardProtectionPreset.STRICT -> context.getString(R.string.settings_rhythm_guard_protection_preset_strict)
+                                                    RhythmGuardProtectionPreset.CUSTOM -> context.getString(R.string.settings_rhythm_guard_protection_preset_custom)
+                                                }
+                                            )
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -7093,6 +7262,83 @@ private fun rhythmGuardWeeklyAverageSessions(stats: Map<String, Long>): Float {
     return recentDays.average().toFloat()
 }
 
+internal data class RhythmGuardSafetySnapshot(
+    val riskScore: Float,
+    val safetyProgress: Float
+)
+
+internal fun rhythmGuardCalculateSafetySnapshot(
+    isEnabled: Boolean,
+    isManualMode: Boolean,
+    manualWarningsEnabled: Boolean,
+    currentVolumeFraction: Float,
+    safeVolumeThresholdFraction: Float,
+    exposureMinutes: Int,
+    exposureLimitMinutes: Int,
+    weeklyAverageSessions: Float,
+    timeoutActive: Boolean,
+    cooldownActive: Boolean,
+    cooldownProgress: Float
+): RhythmGuardSafetySnapshot {
+    if (!isEnabled) {
+        return RhythmGuardSafetySnapshot(riskScore = 0f, safetyProgress = 0f)
+    }
+
+    if (timeoutActive) {
+        return RhythmGuardSafetySnapshot(riskScore = 1f, safetyProgress = 0f)
+    }
+
+    val safeVolumeThreshold = rhythmGuardSanitizeFloat(safeVolumeThresholdFraction, fallback = 0.01f)
+        .coerceIn(0.01f, 1f)
+    val safeCurrentVolume = rhythmGuardSanitizeFloat(currentVolumeFraction)
+    val safeExposureMinutes = exposureMinutes.coerceAtLeast(0)
+    val safeExposureLimit = exposureLimitMinutes.coerceAtLeast(1)
+    val safeWeeklySessions = rhythmGuardSanitizeFloat(weeklyAverageSessions)
+
+    val volumeRatio = safeCurrentVolume / safeVolumeThreshold
+    val exposureRatio = safeExposureMinutes.toFloat() / safeExposureLimit.toFloat()
+    val sessionRatio = safeWeeklySessions / 8f
+
+    val volumePressure = rhythmGuardNormalizePressure(volumeRatio)
+    val exposurePressure = rhythmGuardNormalizePressure(exposureRatio)
+    val sessionPressure = rhythmGuardNormalizePressure(sessionRatio)
+
+    var riskScore = (
+        (volumePressure * 0.40f) +
+            (exposurePressure * 0.42f) +
+            (sessionPressure * 0.18f)
+        ).coerceIn(0f, 1f)
+
+    if (isManualMode && !manualWarningsEnabled) {
+        riskScore = (riskScore + 0.07f).coerceIn(0f, 1f)
+    }
+
+    if (cooldownActive) {
+        val recoveryProgress = rhythmGuardSanitizeFloat(cooldownProgress).coerceIn(0f, 1f)
+        val decay = 0.82f - (recoveryProgress * 0.30f)
+        riskScore = (riskScore * decay).coerceIn(0.18f, 0.70f)
+    }
+
+    val safetyProgress = (1f - riskScore).coerceIn(0f, 1f)
+    return RhythmGuardSafetySnapshot(riskScore = riskScore, safetyProgress = safetyProgress)
+}
+
+private fun rhythmGuardSanitizeFloat(value: Float, fallback: Float = 0f): Float {
+    return if (value.isFinite()) value.coerceAtLeast(0f) else fallback
+}
+
+private fun rhythmGuardNormalizePressure(ratio: Float): Float {
+    val safeRatio = rhythmGuardSanitizeFloat(ratio)
+    return when {
+        safeRatio <= 0f -> 0f
+        safeRatio <= 0.6f -> (safeRatio / 0.6f) * 0.32f
+        safeRatio <= 1f -> 0.32f + ((safeRatio - 0.6f) / 0.4f) * 0.24f
+        safeRatio <= 1.5f -> 0.56f + ((safeRatio - 1f) / 0.5f) * 0.29f
+        safeRatio <= 2f -> 0.85f + ((safeRatio - 1.5f) / 0.5f) * 0.10f
+        else -> 0.95f + ((safeRatio - 2f) / 2f) * 0.05f
+    }.coerceIn(0f, 1f)
+}
+
 @Composable
 private fun rememberSystemMusicVolumeFraction(context: Context): Float {
     var systemVolume by remember { mutableFloatStateOf(0f) }
@@ -7149,6 +7395,19 @@ private fun rhythmGuardFormatDurationFromMinutes(minutes: Int): String {
 
 private fun rhythmGuardFormatDurationFromMillis(durationMs: Long): String {
     return rhythmGuardFormatDurationFromMinutes((durationMs / 60000L).toInt())
+}
+
+private fun rhythmGuardFormatCountdownFromSeconds(seconds: Long): String {
+    val safeSeconds = seconds.coerceAtLeast(0L)
+    val hours = safeSeconds / 3600L
+    val minutes = (safeSeconds % 3600L) / 60L
+    val secs = safeSeconds % 60L
+
+    return if (hours > 0L) {
+        String.format("%d:%02d:%02d", hours, minutes, secs)
+    } else {
+        String.format("%02d:%02d", minutes, secs)
+    }
 }
 
 @Composable
@@ -7498,7 +7757,116 @@ private enum class RhythmGuardOverallHealthLevel {
     OFF,
     GOOD,
     FAIR,
-    RISK
+    RISK,
+    COOLDOWN,
+    TIMEOUT
+}
+
+private enum class RhythmGuardProtectionPreset {
+    GENTLE,
+    BALANCED,
+    STRICT,
+    CUSTOM
+}
+
+private data class RhythmGuardProtectionPresetValues(
+    val volumeThreshold: Float,
+    val alertThresholdMinutes: Int,
+    val warningTimeoutMinutes: Int,
+    val postTimeoutCooldownMinutes: Int,
+    val breakResumeMinutes: Int
+)
+
+private fun rhythmGuardPresetValues(preset: RhythmGuardProtectionPreset): RhythmGuardProtectionPresetValues {
+    return when (preset) {
+        RhythmGuardProtectionPreset.GENTLE -> RhythmGuardProtectionPresetValues(
+            volumeThreshold = 0.80f,
+            alertThresholdMinutes = 120,
+            warningTimeoutMinutes = 10,
+            postTimeoutCooldownMinutes = 5,
+            breakResumeMinutes = 10
+        )
+        RhythmGuardProtectionPreset.BALANCED -> RhythmGuardProtectionPresetValues(
+            volumeThreshold = 0.68f,
+            alertThresholdMinutes = 90,
+            warningTimeoutMinutes = 5,
+            postTimeoutCooldownMinutes = 10,
+            breakResumeMinutes = 15
+        )
+        RhythmGuardProtectionPreset.STRICT -> RhythmGuardProtectionPresetValues(
+            volumeThreshold = 0.58f,
+            alertThresholdMinutes = 60,
+            warningTimeoutMinutes = 3,
+            postTimeoutCooldownMinutes = 15,
+            breakResumeMinutes = 20
+        )
+        RhythmGuardProtectionPreset.CUSTOM -> RhythmGuardProtectionPresetValues(
+            volumeThreshold = 0.68f,
+            alertThresholdMinutes = 90,
+            warningTimeoutMinutes = 5,
+            postTimeoutCooldownMinutes = 10,
+            breakResumeMinutes = 15
+        )
+    }
+}
+
+private fun rhythmGuardResolveProtectionPreset(
+    manualVolumeThreshold: Float,
+    alertThresholdMinutes: Int,
+    warningTimeoutMinutes: Int,
+    postTimeoutCooldownMinutes: Int,
+    breakResumeMinutes: Int,
+    manualWarningsEnabled: Boolean
+): RhythmGuardProtectionPreset {
+    if (!manualWarningsEnabled) {
+        return RhythmGuardProtectionPreset.CUSTOM
+    }
+
+    return when {
+        rhythmGuardMatchesPreset(
+            manualVolumeThreshold,
+            alertThresholdMinutes,
+            warningTimeoutMinutes,
+            postTimeoutCooldownMinutes,
+            breakResumeMinutes,
+            rhythmGuardPresetValues(RhythmGuardProtectionPreset.GENTLE)
+        ) -> RhythmGuardProtectionPreset.GENTLE
+
+        rhythmGuardMatchesPreset(
+            manualVolumeThreshold,
+            alertThresholdMinutes,
+            warningTimeoutMinutes,
+            postTimeoutCooldownMinutes,
+            breakResumeMinutes,
+            rhythmGuardPresetValues(RhythmGuardProtectionPreset.BALANCED)
+        ) -> RhythmGuardProtectionPreset.BALANCED
+
+        rhythmGuardMatchesPreset(
+            manualVolumeThreshold,
+            alertThresholdMinutes,
+            warningTimeoutMinutes,
+            postTimeoutCooldownMinutes,
+            breakResumeMinutes,
+            rhythmGuardPresetValues(RhythmGuardProtectionPreset.STRICT)
+        ) -> RhythmGuardProtectionPreset.STRICT
+
+        else -> RhythmGuardProtectionPreset.CUSTOM
+    }
+}
+
+private fun rhythmGuardMatchesPreset(
+    manualVolumeThreshold: Float,
+    alertThresholdMinutes: Int,
+    warningTimeoutMinutes: Int,
+    postTimeoutCooldownMinutes: Int,
+    breakResumeMinutes: Int,
+    preset: RhythmGuardProtectionPresetValues
+): Boolean {
+    return kotlin.math.abs(manualVolumeThreshold - preset.volumeThreshold) <= 0.015f &&
+        alertThresholdMinutes == preset.alertThresholdMinutes &&
+        warningTimeoutMinutes == preset.warningTimeoutMinutes &&
+        postTimeoutCooldownMinutes == preset.postTimeoutCooldownMinutes &&
+        breakResumeMinutes == preset.breakResumeMinutes
 }
 
 private enum class RhythmGuardWidgetVisualLevel {
@@ -7512,43 +7880,46 @@ private enum class RhythmGuardWidgetVisualLevel {
 private fun RhythmGuardOverallHealthCard(
     level: RhythmGuardOverallHealthLevel,
     progress: Float,
-    isEnabled: Boolean,
+    statusText: String,
+    statusDetail: String?,
     modifier: Modifier = Modifier
 ) {
     val statusGreen = Color(0xFF2E7D32)
     val statusOrange = Color(0xFFED6C02)
     val statusRed = Color(0xFFC62828)
+    val statusBlue = Color(0xFF1565C0)
     val indicatorColor = when (level) {
         RhythmGuardOverallHealthLevel.GOOD -> statusGreen
         RhythmGuardOverallHealthLevel.FAIR -> statusOrange
         RhythmGuardOverallHealthLevel.RISK -> statusRed
+        RhythmGuardOverallHealthLevel.COOLDOWN -> statusBlue
+        RhythmGuardOverallHealthLevel.TIMEOUT -> statusRed
         RhythmGuardOverallHealthLevel.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val statusContainerColor = when (level) {
         RhythmGuardOverallHealthLevel.GOOD -> statusGreen.copy(alpha = 0.14f)
         RhythmGuardOverallHealthLevel.FAIR -> statusOrange.copy(alpha = 0.16f)
         RhythmGuardOverallHealthLevel.RISK -> statusRed.copy(alpha = 0.16f)
+        RhythmGuardOverallHealthLevel.COOLDOWN -> statusBlue.copy(alpha = 0.16f)
+        RhythmGuardOverallHealthLevel.TIMEOUT -> statusRed.copy(alpha = 0.20f)
         RhythmGuardOverallHealthLevel.OFF -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
     val statusColor = when (level) {
         RhythmGuardOverallHealthLevel.GOOD -> statusGreen
         RhythmGuardOverallHealthLevel.FAIR -> statusOrange
         RhythmGuardOverallHealthLevel.RISK -> statusRed
+        RhythmGuardOverallHealthLevel.COOLDOWN -> statusBlue
+        RhythmGuardOverallHealthLevel.TIMEOUT -> statusRed
         RhythmGuardOverallHealthLevel.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val animatedProgress by animateFloatAsState(
-        targetValue = if (isEnabled) progress.coerceIn(0f, 1f) else 0f,
+        targetValue = progress.coerceIn(0f, 1f),
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessLow
         ),
         label = "rhythm_guard_overall_progress"
     )
-    val statusText = if (isEnabled) {
-        stringResource(R.string.settings_rhythm_guard_state_active)
-    } else {
-        stringResource(R.string.settings_rhythm_guard_state_inactive)
-    }
 
     Column(
         modifier = modifier,
@@ -7591,6 +7962,15 @@ private fun RhythmGuardOverallHealthCard(
                 color = statusColor,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+            )
+        }
+
+        if (!statusDetail.isNullOrBlank()) {
+            Text(
+                text = statusDetail,
+                style = MaterialTheme.typography.bodySmall,
+                color = statusColor.copy(alpha = 0.88f),
+                textAlign = TextAlign.Center
             )
         }
     }
