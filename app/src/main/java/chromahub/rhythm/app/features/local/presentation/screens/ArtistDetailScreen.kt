@@ -53,8 +53,15 @@ import chromahub.rhythm.app.shared.presentation.components.common.M3PlaceholderT
 import chromahub.rhythm.app.shared.presentation.components.icons.RhythmIcons
 import chromahub.rhythm.app.util.HapticUtils
 import chromahub.rhythm.app.util.ImageUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private data class ArtistDetailContent(
+    val songs: List<Song>,
+    val albums: List<Album>
+)
 
 @Composable
 fun ArtistDetailScreen(
@@ -76,7 +83,6 @@ fun ArtistDetailScreen(
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
     val viewModel: MusicViewModel = viewModel()
     val appSettings = remember { AppSettings.getInstance(context) }
     val groupByAlbumArtist by appSettings.groupByAlbumArtist.collectAsState()
@@ -93,19 +99,28 @@ fun ArtistDetailScreen(
     val artist = remember(allArtists, artistName) {
         allArtists.find { it.name == artistName }
     }
-    
-    // Helper function to split artist names
-    val splitArtistNames: (String) -> List<String> = remember {
-        { artistNameStr ->
-            // Character-level delimiters from settings
-            val artistSeparatorEnabled = appSettings.artistSeparatorEnabled.value
-            val charDelimiters = if (artistSeparatorEnabled) {
-                appSettings.artistSeparatorDelimiters.value.toList().map { it.toString() }
-            } else emptyList()
 
-            if (charDelimiters.isEmpty()) {
-                listOf(artistNameStr.trim()).filter { it.isNotBlank() }
+    val artistContent by produceState<ArtistDetailContent?>(
+        initialValue = null,
+        allSongs,
+        allAlbums,
+        artistName,
+        groupByAlbumArtist,
+        artistSeparatorEnabled,
+        artistSeparatorDelimiters
+    ) {
+        value = withContext(Dispatchers.Default) {
+            val charDelimiters = if (artistSeparatorEnabled) {
+                artistSeparatorDelimiters.toList().map { it.toString() }
             } else {
+                emptyList()
+            }
+
+            fun splitArtistNames(artistNameStr: String): List<String> {
+                if (charDelimiters.isEmpty()) {
+                    return listOf(artistNameStr.trim()).filter { it.isNotBlank() }
+                }
+
                 val selectedDelimiterChars = charDelimiters.mapNotNull { it.firstOrNull() }.toSet()
                 val wordSeparators = mutableListOf<String>().apply {
                     if (selectedDelimiterChars.contains('&')) add(" & ")
@@ -130,52 +145,41 @@ fun ArtistDetailScreen(
                 for (separator in wordSeparators) {
                     names = names.flatMap { it.split(separator, ignoreCase = true) }
                 }
-                names.map { it.trim() }.filter { it.isNotBlank() }
+                return names.map { it.trim() }.filter { it.isNotBlank() }
             }
-        }
-    }
-    
-    // Filter songs and albums for this artist based on grouping preference
-    val artistSongs = remember(allSongs, artistName, groupByAlbumArtist, artistSeparatorEnabled, artistSeparatorDelimiters) {
-        allSongs.filter { song ->
-            if (groupByAlbumArtist) {
-                val explicitAlbumArtist = song.albumArtist?.trim().orEmpty()
-                val songArtistNames = if (explicitAlbumArtist.isNotBlank() && !explicitAlbumArtist.equals("<unknown>", ignoreCase = true)) {
-                    splitArtistNames(explicitAlbumArtist)
-                } else {
-                    splitArtistNames(song.artist)
-                }
-                songArtistNames.any { it.equals(artistName, ignoreCase = true) }
-            } else {
-                splitArtistNames(song.artist).any { it.equals(artistName, ignoreCase = true) }
-            }
-        }
-    }
-    
-    val artistAlbums = remember(allAlbums, allSongs, artistName, groupByAlbumArtist, artistSeparatorEnabled, artistSeparatorDelimiters) {
-        if (groupByAlbumArtist) {
-            allAlbums.filter { album ->
-                allSongs.any { song ->
-                    val explicitAlbumArtist = song.albumArtist?.trim().orEmpty()
-                    val songArtistNames = if (explicitAlbumArtist.isNotBlank() && !explicitAlbumArtist.equals("<unknown>", ignoreCase = true)) {
-                        splitArtistNames(explicitAlbumArtist)
-                    } else {
-                        splitArtistNames(song.artist)
-                    }
 
-                    song.album == album.title &&
-                    song.albumId == album.id &&
-                    songArtistNames.any { it.equals(artistName, ignoreCase = true) }
+            fun songMatchesArtist(song: Song): Boolean {
+                val artistField = if (groupByAlbumArtist) {
+                    val explicitAlbumArtist = song.albumArtist?.trim().orEmpty()
+                    if (explicitAlbumArtist.isNotBlank() && !explicitAlbumArtist.equals("<unknown>", ignoreCase = true)) {
+                        explicitAlbumArtist
+                    } else {
+                        song.artist
+                    }
+                } else {
+                    song.artist
                 }
+
+                return splitArtistNames(artistField).any { it.equals(artistName, ignoreCase = true) }
             }
-        } else {
-            allAlbums.filter { album ->
-                allSongs.any { song ->
-                    song.album == album.title &&
-                    song.albumId == album.id &&
-                    splitArtistNames(song.artist).any { it.equals(artistName, ignoreCase = true) }
-                }
-            }
+
+            val songs = allSongs.filter(::songMatchesArtist)
+            val albumKeys = songs.asSequence().map { it.albumId to it.album }.toSet()
+            val albums = allAlbums.filter { album -> albumKeys.contains(album.id to album.title) }
+            ArtistDetailContent(songs = songs, albums = albums)
+        }
+    }
+
+    val artistSongs = artistContent?.songs.orEmpty()
+    val artistAlbums = artistContent?.albums.orEmpty()
+    val isArtistContentLoading = artistContent == null
+
+    val imageRefreshRequestedArtistIds = remember { mutableStateListOf<String>() }
+    LaunchedEffect(artist?.id, artist?.artworkUri) {
+        val currentArtist = artist ?: return@LaunchedEffect
+        if (currentArtist.artworkUri == null && !imageRefreshRequestedArtistIds.contains(currentArtist.id)) {
+            imageRefreshRequestedArtistIds.add(currentArtist.id)
+            viewModel.refreshArtistImage(currentArtist.id)
         }
     }
     
@@ -205,26 +209,37 @@ fun ArtistDetailScreen(
             // Action Buttons Section
             item {
                 Spacer(modifier = Modifier.height(38.dp)) // Extra spacing from header
-                ArtistActionButtons(
-                    artistSongs = artistSongs,
-                    onPlayAll = {
-                        if (artistSongs.isNotEmpty()) {
-                            onPlayAll(artistSongs)
-                            onPlayerClick()
-                        }
-                    },
-                    onShufflePlay = {
-                        if (artistSongs.isNotEmpty()) {
-                            onShufflePlay(artistSongs)
-                            onPlayerClick()
-                        }
-                    },
-                    haptics = haptics
-                )
+                if (isArtistContentLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    ArtistActionButtons(
+                        artistSongs = artistSongs,
+                        onPlayAll = {
+                            if (artistSongs.isNotEmpty()) {
+                                onPlayAll(artistSongs)
+                                onPlayerClick()
+                            }
+                        },
+                        onShufflePlay = {
+                            if (artistSongs.isNotEmpty()) {
+                                onShufflePlay(artistSongs)
+                                onPlayerClick()
+                            }
+                        },
+                        haptics = haptics
+                    )
+                }
             }
             
             // Albums Section
-            if (artistAlbums.isNotEmpty()) {
+            if (!isArtistContentLoading && artistAlbums.isNotEmpty()) {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                     ArtistAlbumsSection(
@@ -237,7 +252,7 @@ fun ArtistDetailScreen(
             }
             
             // Songs Section
-            if (artistSongs.isNotEmpty()) {
+            if (!isArtistContentLoading && artistSongs.isNotEmpty()) {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                     Card(

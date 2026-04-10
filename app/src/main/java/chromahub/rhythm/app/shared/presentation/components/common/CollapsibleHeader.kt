@@ -30,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,7 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import chromahub.rhythm.app.shared.data.model.Artist
 import chromahub.rhythm.app.shared.presentation.components.icons.RhythmIcons
@@ -329,7 +330,7 @@ fun ArtistCollapsibleHeaderScreen(
                     .fillMaxWidth()
                     .height(360.dp)
             ) {
-                AsyncImage(
+                SubcomposeAsyncImage(
                     model = ImageRequest.Builder(context)
                         .apply(
                             chromahub.rhythm.app.util.ImageUtils.buildImageRequest(
@@ -342,7 +343,20 @@ fun ArtistCollapsibleHeaderScreen(
                         .build(),
                     contentDescription = "Artist artwork for $artistName",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    loading = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.5.dp
+                            )
+                        }
+                    }
                 )
 
                 // Multi-layer gradient overlay for better readability
