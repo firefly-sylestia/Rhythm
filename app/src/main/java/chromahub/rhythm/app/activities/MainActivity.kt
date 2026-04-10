@@ -99,6 +99,7 @@ import androidx.compose.ui.text.font.FontWeight
 import chromahub.rhythm.app.features.local.presentation.viewmodel.MusicViewModel
 //import chromahub.rhythm.app.ui.annotations.RhythmAnimation
 import android.provider.Settings
+import chromahub.rhythm.app.util.ServiceStartUtils
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -528,10 +529,16 @@ class MainActivity : ComponentActivity() {
         return try {
             val serviceIntent = Intent(this, chromahub.rhythm.app.infrastructure.service.MediaPlaybackService::class.java)
             serviceIntent.action = chromahub.rhythm.app.infrastructure.service.MediaPlaybackService.ACTION_INIT_SERVICE
-            
-            // Media3's MediaLibraryService handles foreground state automatically in onCreate()
-            // so startService() is sufficient for all SDK versions
-            startService(serviceIntent)
+
+            val started = ServiceStartUtils.startServiceSafely(
+                context = this,
+                intent = serviceIntent,
+                logTag = TAG,
+                reason = "main_activity_init_service"
+            )
+            if (!started) {
+                return false
+            }
             
             // Wait for service to be ready
             delay(1000)
@@ -578,9 +585,17 @@ class MainActivity : ComponentActivity() {
             val playIntent = Intent(applicationContext, chromahub.rhythm.app.infrastructure.service.MediaPlaybackService::class.java)
             playIntent.action = chromahub.rhythm.app.infrastructure.service.MediaPlaybackService.ACTION_PLAY_EXTERNAL_FILE
             playIntent.data = uri
-            
-            // Media3's MediaLibraryService handles foreground state automatically
-            startService(playIntent)
+
+            val started = ServiceStartUtils.startServiceSafely(
+                context = applicationContext,
+                intent = playIntent,
+                logTag = TAG,
+                reason = "main_activity_fallback_external_play"
+            )
+            if (!started) {
+                Toast.makeText(applicationContext, "Failed to play audio file", Toast.LENGTH_SHORT).show()
+                return
+            }
             
             // Give fallback some time to start
             delay(1000)

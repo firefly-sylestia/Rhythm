@@ -3,6 +3,7 @@ package chromahub.rhythm.app.activities
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import chromahub.rhythm.app.R
 import androidx.activity.compose.setContent
@@ -50,9 +51,10 @@ import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.time.delay
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 /**
  * Compact bottom sheet activity for playing external audio files.
@@ -62,26 +64,17 @@ class ExternalPlaybackActivity : ComponentActivity() {
     private val TAG = "ExternalPlaybackActivity"
     private val musicViewModel: MusicViewModel by viewModels()
     private val themeViewModel: ThemeViewModel by viewModels()
+    private var playbackRequestJob: Job? = null
+    private var lastHandledUri: String? = null
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Wait for ViewModel to initialize and connect to service
+        // Connect eagerly and handle the incoming intent immediately for snappier startup.
         lifecycleScope.launch {
-            // Give the ViewModel time to connect to the service
-            var attempts = 0
-            while (!musicViewModel.serviceConnected.value && attempts < 50) {
-                delay(100)
-                attempts++
-            }
-            
-            if (musicViewModel.serviceConnected.value) {
-                handleIntent(intent)
-            } else {
-                // Service didn't connect, try handling intent anyway
-                handleIntent(intent)
-            }
+            musicViewModel.connectToMediaService()
+            handleIntent(intent)
         }
         
         setContent {
@@ -111,50 +104,99 @@ class ExternalPlaybackActivity : ComponentActivity() {
     
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
+        musicViewModel.connectToMediaService()
         handleIntent(intent)
     }
+
+    override fun onDestroy() {
+        playbackRequestJob?.cancel()
+        super.onDestroy()
+    }
+
     private fun handleIntent(intent: Intent) {
         Log.d(TAG, "handleIntent called, action=${intent.action}")
-        if (intent.action == Intent.ACTION_VIEW) {
-            intent.data?.let { uri ->
-                Log.d(TAG, "Playing external file from URI: $uri")
-                lifecycleScope.launch {
-                    playExternalFile(uri)
-                }
-            } ?: Log.e(TAG, "Intent data is null!")
+        if (intent.action != Intent.ACTION_VIEW) {
+            Log.w(TAG, "Unsupported intent action for external playback: ${intent.action}")
+            return
+        }
+
+        val uri = intent.data ?: run {
+            Log.e(TAG, "Intent data is null")
+            Toast.makeText(this, "Unable to open audio file", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (!isValidAudioUri(uri)) {
+            Log.w(TAG, "Rejected non-audio or unreadable URI: $uri")
+            Toast.makeText(this, "Unsupported or unreadable audio file", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val uriKey = uri.toString()
+        if (playbackRequestJob?.isActive == true && lastHandledUri == uriKey) {
+            Log.d(TAG, "Duplicate playback request ignored for URI: $uri")
+            return
+        }
+
+        lastHandledUri = uriKey
+        playbackRequestJob?.cancel()
+        playbackRequestJob = lifecycleScope.launch {
+            musicViewModel.connectToMediaService()
+            playExternalFile(uri)
         }
     }
-    
-    private suspend fun playExternalFile(uri: Uri) = withContext(Dispatchers.IO) {
-        Log.d(TAG, "playExternalFile: Starting, URI=$uri")
-        
-        // Check if file exists in MediaStore
-        val existingSong = MediaUtils.findSongInMediaStore(this@ExternalPlaybackActivity, uri)
-        
-        if (existingSong != null) {
-            Log.d(TAG, "Found existing song in MediaStore: ${existingSong.title}")
-            // File is already in MediaStore - play it directly
-            withContext(Dispatchers.Main) {
-                musicViewModel.playSong(existingSong)
-            }
-        } else {
-            Log.d(TAG, "Extracting metadata from external file")
-            // Extract metadata and play as external file
-            val song = MediaUtils.extractMetadataFromUri(this@ExternalPlaybackActivity, uri)
-            
-            Log.d(TAG, "Extracted song: title=${song?.title}, artist=${song?.artist}, uri=${song?.uri}")
-            
-            withContext(Dispatchers.Main) {
-                if (song != null) {
-                    Log.d(TAG, "Calling playExternalAudioFile")
-                    musicViewModel.playExternalAudioFile(song)
-                    
-                    // Small delay to let playback start, then check state
-                    delay(500)
-                    Log.d(TAG, "After playback start - isPlaying=${musicViewModel.isPlaying.value}, currentSong=${musicViewModel.currentSong.value?.title}")
-                } else {
-                    Log.e(TAG, "Failed to extract metadata from URI")
+
+    private fun isValidAudioUri(uri: Uri): Boolean {
+        return try {
+            val mimeType = MediaUtils.getMimeType(applicationContext, uri)
+            mimeType?.startsWith("audio/") == true ||
+                uri.toString().let { uriStr ->
+                    uriStr.endsWith(".mp3", ignoreCase = true) ||
+                        uriStr.endsWith(".m4a", ignoreCase = true) ||
+                        uriStr.endsWith(".alac", ignoreCase = true) ||
+                        uriStr.endsWith(".wav", ignoreCase = true) ||
+                        uriStr.endsWith(".ogg", ignoreCase = true) ||
+                        uriStr.endsWith(".flac", ignoreCase = true) ||
+                        uriStr.endsWith(".aac", ignoreCase = true) ||
+                        uriStr.endsWith(".opus", ignoreCase = true) ||
+                        uriStr.endsWith(".wma", ignoreCase = true)
                 }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error validating external URI: $uri", e)
+            false
+        }
+    }
+
+    private suspend fun playExternalFile(uri: Uri) = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "playExternalFile: Starting, URI=$uri")
+
+            // Check if file exists in MediaStore
+            val existingSong = MediaUtils.findSongInMediaStore(this@ExternalPlaybackActivity, uri)
+
+            val targetSong = if (existingSong != null) {
+                Log.d(TAG, "Found existing song in MediaStore: ${existingSong.title}")
+                existingSong
+            } else {
+                Log.d(TAG, "Extracting metadata from external file")
+                MediaUtils.extractMetadataFromUri(this@ExternalPlaybackActivity, uri)
+            }
+
+            Log.d(TAG, "Resolved external song: title=${targetSong.title}, artist=${targetSong.artist}, uri=${targetSong.uri}")
+
+            withContext(Dispatchers.Main) {
+                Log.d(TAG, "Calling playExternalAudioFile")
+                musicViewModel.playExternalAudioFile(targetSong)
+
+                // Small delay to let playback start, then check state
+                delay(500)
+                Log.d(TAG, "After playback start - isPlaying=${musicViewModel.isPlaying.value}, currentSong=${musicViewModel.currentSong.value?.title}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error playing external file", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@ExternalPlaybackActivity, "Failed to play audio file", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -169,22 +211,39 @@ fun ExternalPlaybackBottomSheet(
 ) {
     val currentSong by musicViewModel.currentSong.collectAsState()
     val isPlaying by musicViewModel.isPlaying.collectAsState()
+    val isBuffering by musicViewModel.isBuffering.collectAsState()
+    val isSeeking by musicViewModel.isSeeking.collectAsState()
     val progress by musicViewModel.progress.collectAsState()
 
     // Animation states
     var showContent by remember { mutableStateOf(false) }
     var awaitingSong by remember { mutableStateOf(true) }
+    var isScrubbing by remember { mutableStateOf(false) }
+    var scrubProgress by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
         delay(100)
         showContent = true
     }
 
-    LaunchedEffect(currentSong) {
+    LaunchedEffect(progress, isScrubbing) {
+        if (!isScrubbing) {
+            scrubProgress = progress.coerceIn(0f, 1f)
+        }
+    }
+
+    LaunchedEffect(currentSong, isBuffering, isSeeking) {
         if (currentSong != null) {
             awaitingSong = false
-        } else if (!awaitingSong) {
-            onDismiss()
+            return@LaunchedEffect
+        }
+
+        if (!awaitingSong && !isBuffering && !isSeeking) {
+            // Avoid dismissing on transient nulls during controller/service churn.
+            delay(1200)
+            if (currentSong == null && !isBuffering && !isSeeking) {
+                onDismiss()
+            }
         }
     }
     Surface(
@@ -405,14 +464,25 @@ fun ExternalPlaybackBottomSheet(
                     tonalElevation = 1.dp
                 ) {
                     currentSong?.let { song ->
+                        val displayedProgress = if (isScrubbing) scrubProgress else progress
+
                         Column(
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
                         ) {
                             WaveSlider(
-                                value = progress,
+                                value = displayedProgress,
                                 onValueChange = { newProgress ->
-                                    val positionMs = (song.duration * newProgress).toLong()
-                                    musicViewModel.seekTo(positionMs)
+                                    isScrubbing = true
+                                    scrubProgress = newProgress.coerceIn(0f, 1f)
+                                },
+                                onValueChangeFinished = {
+                                    val targetPositionMs = (song.duration * scrubProgress).toLong()
+                                    val currentPositionMs =
+                                        (song.duration * progress.coerceIn(0f, 1f)).toLong()
+                                    if (abs(targetPositionMs - currentPositionMs) >= 750L) {
+                                        musicViewModel.seekTo(targetPositionMs)
+                                    }
+                                    isScrubbing = false
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -428,7 +498,7 @@ fun ExternalPlaybackBottomSheet(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = formatTime((song.duration * progress).toLong()),
+                                    text = formatTime((song.duration * displayedProgress).toLong()),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.primary
@@ -476,7 +546,7 @@ fun ExternalPlaybackBottomSheet(
 
                     // Play/Pause Button - Larger and more prominent
                     val buttonWidth by animateDpAsState(
-                        targetValue = if (isPlaying) 76.dp else 160.dp,
+                        targetValue = if (isPlaying || isBuffering) 76.dp else 160.dp,
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioMediumBouncy,
                             stiffness = Spring.StiffnessLow
@@ -486,7 +556,9 @@ fun ExternalPlaybackBottomSheet(
 
                     Surface(
                         onClick = {
-                            musicViewModel.togglePlayPause()
+                            if (!isBuffering) {
+                                musicViewModel.togglePlayPause()
+                            }
                         },
                         modifier = Modifier
                             .height(76.dp)
@@ -501,17 +573,25 @@ fun ExternalPlaybackBottomSheet(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    painter = painterResource(
-                                        if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow
-                                    ),
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(36.dp)
-                                )
+                                if (isBuffering) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(30.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        strokeWidth = 2.5.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        painter = painterResource(
+                                            if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow
+                                        ),
+                                        contentDescription = if (isPlaying) "Pause" else "Play",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                }
 
                                 AnimatedVisibility(
-                                    visible = !isPlaying,
+                                    visible = !isPlaying && !isBuffering,
                                     enter = fadeIn() + expandHorizontally(),
                                     exit = fadeOut() + shrinkHorizontally()
                                 ) {

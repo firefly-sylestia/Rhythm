@@ -79,6 +79,7 @@ import chromahub.rhythm.app.util.QueueUtils
 import chromahub.rhythm.app.util.GenreUtils
 import chromahub.rhythm.app.util.LyricLine
 import chromahub.rhythm.app.util.LyricsParser
+import chromahub.rhythm.app.util.ServiceStartUtils
 import chromahub.rhythm.app.utils.StatusBroadcaster
 import chromahub.rhythm.app.shared.data.repository.PlaybackStatsRepository // Import for enhanced stats tracking
 
@@ -3190,17 +3191,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         Log.d(TAG, "Connecting to media service")
         val context = getApplication<Application>()
         
-        // Start the service first to ensure it's running
-        // Note: Media3's MediaLibraryService handles foreground state automatically in onCreate()
-        // so we use startService() for all SDK versions - the service will call startForeground() internally
+        // Start the service first to ensure it's running.
         val serviceIntent = Intent(context, MediaPlaybackService::class.java)
         serviceIntent.action = MediaPlaybackService.ACTION_INIT_SERVICE
-        
-        try {
-            context.startService(serviceIntent)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start media service: ${e.message}", e)
-            // Try to connect without starting the service - the MediaController might still work
+
+        val serviceStarted = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = serviceIntent,
+            logTag = TAG,
+            reason = "connect_to_media_service"
+        )
+        if (!serviceStarted) {
+            Log.w(TAG, "Failed to start media service before controller connection")
+            // Continue attempting controller connection; the service may already be alive.
         }
 
         releaseStaleControllerConnection()
@@ -6795,17 +6798,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     "Normalization=${enableAudioNormalization.value}, " +
                     "ReplayGain=${enableReplayGain.value}")
             
-            // Send intent to update service settings
-            // Note: Media3's MediaLibraryService is already in foreground, so startService() is sufficient
+            // Send intent to update service settings.
             val context = getApplication<Application>()
             val intent = Intent(context, MediaPlaybackService::class.java).apply {
                 action = MediaPlaybackService.ACTION_UPDATE_SETTINGS
             }
-            try {
-                context.startService(intent)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to update service settings: ${e.message}", e)
-            }
+            ServiceStartUtils.startServiceSafely(
+                context = context,
+                intent = intent,
+                logTag = TAG,
+                reason = "update_playback_settings"
+            )
         }
     }
 
@@ -8081,13 +8084,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("pauseOnly", pauseOnly)
         }
 
-        var serviceCommandSent = false
-        try {
-            context.startService(serviceIntent)
-            serviceCommandSent = true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start service-backed sleep timer, using local fallback", e)
-        }
+        val serviceCommandSent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = serviceIntent,
+            logTag = TAG,
+            reason = "start_sleep_timer"
+        )
 
         if (serviceCommandSent) {
             return
@@ -8132,10 +8134,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             this.action = MediaPlaybackService.ACTION_STOP_SLEEP_TIMER
         }
 
-        try {
-            context.startService(serviceIntent)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to stop service-backed sleep timer", e)
+        val stopSent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = serviceIntent,
+            logTag = TAG,
+            reason = "stop_sleep_timer"
+        )
+        if (!stopSent) {
+            Log.w(TAG, "Failed to stop service-backed sleep timer")
         }
     }
     
@@ -8156,8 +8162,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             action = MediaPlaybackService.ACTION_SET_EQUALIZER_ENABLED
             putExtra("enabled", enabled)
         }
-        context.startService(intent)
-        Log.d(TAG, "Set equalizer enabled: $enabled")
+        val sent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = intent,
+            logTag = TAG,
+            reason = "set_equalizer_enabled"
+        )
+        if (sent) {
+            Log.d(TAG, "Set equalizer enabled: $enabled")
+        }
     }
     
     /**
@@ -8168,8 +8181,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val intent = Intent(context, MediaPlaybackService::class.java).apply {
             action = MediaPlaybackService.ACTION_GET_EQUALIZER_DIAGNOSTICS
         }
-        context.startService(intent)
-        Log.d(TAG, "Requested equalizer diagnostics from service")
+        val sent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = intent,
+            logTag = TAG,
+            reason = "get_equalizer_diagnostics"
+        )
+        if (sent) {
+            Log.d(TAG, "Requested equalizer diagnostics from service")
+        }
     }
     
     fun setEqualizerBandLevel(band: Short, level: Short) {
@@ -8188,8 +8208,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("band", band)
             putExtra("level", level)
         }
-        context.startService(intent)
-        Log.d(TAG, "Set equalizer band $band to level $level")
+        val sent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = intent,
+            logTag = TAG,
+            reason = "set_equalizer_band"
+        )
+        if (sent) {
+            Log.d(TAG, "Set equalizer band $band to level $level")
+        }
     }
     
     fun setBassBoost(enabled: Boolean, strength: Short = 500) {
@@ -8204,8 +8231,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("enabled", enabled)
             putExtra("strength", strength)
         }
-        context.startService(intent)
-        Log.d(TAG, "Set bass boost enabled: $enabled, strength: $strength")
+        val sent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = intent,
+            logTag = TAG,
+            reason = "set_bass_boost"
+        )
+        if (sent) {
+            Log.d(TAG, "Set bass boost enabled: $enabled, strength: $strength")
+        }
     }
     
     fun isBassBoostSupported(): Boolean {
@@ -8233,8 +8267,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("enabled", enabled)
             putExtra("strength", strength)
         }
-        context.startService(intent)
-        Log.d(TAG, "Set virtualizer enabled: $enabled, strength: $strength")
+        val sent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = intent,
+            logTag = TAG,
+            reason = "set_virtualizer"
+        )
+        if (sent) {
+            Log.d(TAG, "Set virtualizer enabled: $enabled, strength: $strength")
+        }
         
         // Update spatialization status after a short delay
         viewModelScope.launch {
@@ -8280,8 +8321,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("preset", preset)
             putExtra("levels", levels.toFloatArray())
         }
-        context.startService(intent)
-        Log.d(TAG, "Applied equalizer preset: $preset")
+        val sent = ServiceStartUtils.startServiceSafely(
+            context = context,
+            intent = intent,
+            logTag = TAG,
+            reason = "apply_equalizer_preset"
+        )
+        if (sent) {
+            Log.d(TAG, "Applied equalizer preset: $preset")
+        }
     }
     
     // AutoEQ functions

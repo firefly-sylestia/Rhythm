@@ -233,7 +233,8 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         // Create notification channel first (required for Android 8.0+)
         createNotificationChannel()
 
-        // Start foreground immediately to avoid ANR
+        // Try foreground promotion early; on newer Android versions this can be blocked
+        // when the service is started from background contexts.
         startForegroundWithNotification(
             getString(chromahub.rhythm.app.R.string.service_rhythm_music),
             getString(chromahub.rhythm.app.R.string.service_starting)
@@ -361,9 +362,32 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
 
-        // Call the system's startForeground() method
-        super.startForeground(NOTIFICATION_ID, notification)
-        Log.d(TAG, "Started foreground service: $title - $content")
+        try {
+            // Call the system's startForeground() method
+            super.startForeground(NOTIFICATION_ID, notification)
+            Log.d(TAG, "Started foreground service: $title - $content")
+        } catch (e: RuntimeException) {
+            val startBlockedBySystem =
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    e.javaClass.name == "android.app.ForegroundServiceStartNotAllowedException") ||
+                    (e is IllegalStateException &&
+                        e.message?.contains("startForeground", ignoreCase = true) == true)
+
+            if (!startBlockedBySystem) {
+                throw e
+            }
+
+            Log.w(
+                TAG,
+                "Foreground start is not currently allowed; continuing with standard notification instead.",
+                e
+            )
+
+            // Keep users informed without crashing when foreground promotion is blocked.
+            val notificationManager =
+                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun updateForegroundNotification(title: String, content: String) {
