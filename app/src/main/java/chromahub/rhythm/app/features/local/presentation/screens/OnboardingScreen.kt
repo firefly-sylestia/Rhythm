@@ -4936,7 +4936,12 @@ fun EnhancedThemingContent(
                     icon = Icons.Filled.Home,
                     options = listOf(context.getString(R.string.option_home), context.getString(R.string.option_library)),
                     onOptionSelected = { selectedOption ->
-                        appSettings.setDefaultScreen(selectedOption.lowercase())
+                        val selectedScreen = if (selectedOption == context.getString(R.string.option_library)) {
+                            "library"
+                        } else {
+                            "home"
+                        }
+                        appSettings.setDefaultScreen(selectedScreen)
                     }
                 )
             }
@@ -5160,7 +5165,12 @@ fun EnhancedThemingContent(
                 icon = Icons.Filled.Home,
                 options = listOf(context.getString(R.string.option_home), context.getString(R.string.option_library)),
                 onOptionSelected = { selectedOption ->
-                    appSettings.setDefaultScreen(selectedOption.lowercase())
+                    val selectedScreen = if (selectedOption == context.getString(R.string.option_library)) {
+                        "library"
+                    } else {
+                        "home"
+                    }
+                    appSettings.setDefaultScreen(selectedScreen)
                 }
             )
 
