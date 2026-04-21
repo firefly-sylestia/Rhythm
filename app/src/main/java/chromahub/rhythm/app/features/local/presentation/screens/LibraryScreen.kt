@@ -120,7 +120,11 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.ToggleFloatingActionButton
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
 import chromahub.rhythm.app.ui.UiConstants
 import chromahub.rhythm.app.ui.theme.MusicDimensions
 import androidx.compose.material3.Icon
@@ -138,6 +142,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -159,11 +164,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -441,48 +453,26 @@ fun LibraryScreen(
     // FAB menu state
     var showPlaylistFabMenu by remember { mutableStateOf(false) }
 
-    // Function to close FAB menu from other places
-    val closeFabMenu = {
+    BackHandler(showPlaylistFabMenu) {
         showPlaylistFabMenu = false
     }
 
     // Handle FAB menu item clicks - close menu after action
     val onCreatePlaylistFromFab: () -> Unit = {
-        HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
         showCreatePlaylistDialog = true
-        showPlaylistFabMenu = false
     }
 
     val onImportPlaylistFromFab: (() -> Unit)? = if (onImportPlaylist != null) {
         {
-            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
             showImportDialog = true
-            showPlaylistFabMenu = false
         }
     } else null
 
     val onExportPlaylistsFromFab: (() -> Unit)? = if (onExportAllPlaylists != null) {
         {
-            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
             showBulkExportDialog = true
-            showPlaylistFabMenu = false
         }
     } else null
-
-    // Lambda to pass to PlaylistFabMenu for import
-    val onImportPlaylistForFab: (() -> Unit)? = if (onImportPlaylist != null) {
-        {
-            HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-            showImportDialog = true
-        }
-    } else null
-
-    // Lambda to pass to PlaylistFabMenu for manage - navigates to Tuner > Playlists
-    val onManagePlaylists: (() -> Unit) = {
-        HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-        // Navigation to Tuner Playlists should be handled by parent (RhythmNavigation)
-        // This is a placeholder that should be replaced with actual navigation
-    }
 
     // Sync tabs with pager - only animate when tab button is clicked
     LaunchedEffect(selectedTabIndex) {
@@ -655,8 +645,11 @@ fun LibraryScreen(
     val pullToRefreshState = rememberPullToRefreshState()
     var isRefreshing by remember { mutableStateOf(false) }
     val isTabletLayout = LocalConfiguration.current.screenWidthDp >= 600
-    val libraryBottomOverlayPadding =
-        if (isTabletLayout) 0.dp else (MusicDimensions.bottomNavigationHeight + 16.dp)
+    val isPlaylistTabSelected = visibleTabIds.getOrNull(selectedTabIndex) == "PLAYLISTS"
+    val baseLibraryBottomPadding =
+        if (isTabletLayout) 16.dp else (MusicDimensions.bottomNavigationHeight + 16.dp)
+    val playlistFabOverlayPadding = if (isPlaylistTabSelected) 84.dp else 0.dp
+    val libraryBottomOverlayPadding = baseLibraryBottomPadding + playlistFabOverlayPadding
     
     // Update refreshing state based on library refreshing
     LaunchedEffect(isLibraryRefreshing) {
@@ -1203,11 +1196,13 @@ fun LibraryScreen(
             // Only show FAB on playlists tab
             if (visibleTabIds.getOrNull(selectedTabIndex) == "PLAYLISTS") {
                 PlaylistFabMenu(
+                    visible = fabVisibility,
                     expanded = showPlaylistFabMenu,
+                    onExpandedChange = { showPlaylistFabMenu = it },
                     onCreatePlaylist = onCreatePlaylistFromFab,
                     onImportPlaylist = onImportPlaylistFromFab,
-                onExportPlaylists = onExportPlaylistsFromFab,
-//                    onManagePlaylists = onManagePlaylists
+                    onExportPlaylists = onExportPlaylistsFromFab,
+                    bottomPadding = baseLibraryBottomPadding,
                     haptics = haptics // Pass haptics to PlaylistFabMenu
                 )
             }
@@ -8116,176 +8111,91 @@ fun PlaylistFabMenuContent(
 
 @Composable
 fun PlaylistFabMenu(
+    visible: Boolean,
     expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onCreatePlaylist: () -> Unit,
     onImportPlaylist: (() -> Unit)?,
     onExportPlaylists: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    bottomPadding: androidx.compose.ui.unit.Dp = 0.dp,
     haptics: androidx.compose.ui.hapticfeedback.HapticFeedback // Added haptics parameter
 ) {
     val context = LocalContext.current
-    var isExpanded by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val miniPlayerPadding = LocalMiniPlayerPadding.current
-
-    // Animate FAB expansion
-    val fabScale by animateFloatAsState(
-        targetValue = if (isExpanded) 1.1f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "fabScale"
-    )
-
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.BottomEnd
-    ) {
-        val miniPlayerPadding = LocalMiniPlayerPadding.current
-
-        // Calculate consistent spacing from main FAB (bottom = 50.dp, FAB size = 56.dp)
-        // Base position above main FAB: 50 + 56 + 16 = 122.dp
-        val fabBaseBottom = 50.dp + 56.dp + 16.dp
-        val menuItemHeight = 56.dp // Approximate FabMenuItem height
-        val spacing = 16.dp
-
-        // FAB Menu Items with corrected positioning
-        AnimatedVisibility(
-            visible = isExpanded,
-            enter = fadeIn(animationSpec = tween(300, delayMillis = 300)) +
-                   slideInHorizontally(
-                       animationSpec = tween(300, delayMillis = 300),
-                       initialOffsetX = { it / 2 }
-                   ),
-            exit = fadeOut(animationSpec = tween(200, delayMillis = 200)) +
-                  slideOutHorizontally(
-                      animationSpec = tween(200, delayMillis = 200),
-                      targetOffsetX = { it / 2 }
-                  )
-        ) {
-            FabMenuItem(
-                label = "New playlist",
-                icon = RhythmIcons.Add,
-                contentDescription = "Create new playlist",
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                onClick = {
-                    HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-                    scope.launch {
-                        onCreatePlaylist()
-                        isExpanded = false
-                    }
-                },
-                animationDelay = 100,
-                haptics = haptics, // Pass haptics
-                modifier = Modifier.padding(
-                    bottom = fabBaseBottom, // Directly above main FAB
-                    end = 16.dp
-                )
-            )
-        }
-
-        AnimatedVisibility(
-            visible = isExpanded && onImportPlaylist != null,
-            enter = fadeIn(animationSpec = tween(300, delayMillis = 150)) +
-                   slideInHorizontally(
-                       animationSpec = tween(300, delayMillis = 150),
-                       initialOffsetX = { it / 2 }
-                   ),
-            exit = fadeOut(animationSpec = tween(200, delayMillis = 100)) +
-                  slideOutHorizontally(
-                      animationSpec = tween(200, delayMillis = 100),
-                      targetOffsetX = { it / 2 }
-                  )
-        ) {
-            FabMenuItem(
-                label = "Import playlist",
-                icon = RhythmIcons.Actions.Download,
-                contentDescription = "Import playlist",
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                onClick = {
-                    HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-                    scope.launch {
-                        onImportPlaylist?.invoke()
-                        isExpanded = false
-                    }
-                },
-                animationDelay = 50,
-                haptics = haptics, // Pass haptics
-                modifier = Modifier.padding(
-                    bottom = fabBaseBottom + menuItemHeight + spacing, // Above "New playlist"
-                    end = 16.dp
-                )
-            )
-        }
-
-        AnimatedVisibility(
-            visible = isExpanded && onExportPlaylists != null,
-            enter = fadeIn(animationSpec = tween(300, delayMillis = 0)) +
-                   slideInHorizontally(
-                       animationSpec = tween(300, delayMillis = 0),
-                       initialOffsetX = { it / 2 }
-                   ),
-            exit = fadeOut(animationSpec = tween(200, delayMillis = 0)) +
-                  slideOutHorizontally(
-                      animationSpec = tween(200, delayMillis = 0),
-                      targetOffsetX = { it / 2 }
-                  )
-        ) {
-            FabMenuItem(
-                label = "Export playlists",
-                icon = Icons.Default.FileUpload,
-                contentDescription = "Export playlists",
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                onClick = {
-                    HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-                    scope.launch {
-                        onExportPlaylists?.invoke()
-                        isExpanded = false
-                    }
-                },
-                animationDelay = 0,
-                haptics = haptics, // Pass haptics
-                modifier = Modifier.padding(
-                    bottom = fabBaseBottom + (menuItemHeight + spacing) * 2, // Above "Import playlist"
-                    end = 16.dp
-                )
-            )
-        }
-
-        // Main FAB with simple rotation animation
-        val fabRotation by animateFloatAsState(
-            targetValue = if (isExpanded) 180f else 0f,
-            animationSpec = tween(durationMillis = 300),
-            label = "fabRotation"
-        )
-
-        FloatingActionButton(
-            onClick = {
-                HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
-                isExpanded = !isExpanded
+    val menuItems = remember(onCreatePlaylist, onImportPlaylist, onExportPlaylists) {
+        listOfNotNull(
+            Triple("New playlist", RhythmIcons.Add, onCreatePlaylist),
+            onImportPlaylist?.let {
+                Triple("Import playlist", RhythmIcons.Actions.Download, it)
             },
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            elevation = FloatingActionButtonDefaults.elevation(
-                defaultElevation = 0.dp,
-                pressedElevation = 12.dp
-            ),
-            modifier = Modifier
-                .padding(bottom = 10.dp) // Simple fixed spacing
-                .size(56.dp)
-        ) {
-            Icon(
-                imageVector = if (isExpanded) Icons.Default.Close else RhythmIcons.Add,
-                contentDescription = if (isExpanded) "Close FAB menu" else "Open FAB menu",
+            onExportPlaylists?.let {
+                Triple("Export playlists", Icons.Default.FileUpload, it)
+            }
+        )
+    }
+
+    FloatingActionButtonMenu(
+        modifier = modifier.padding(bottom = bottomPadding + 8.dp),
+        expanded = expanded,
+        button = {
+            ToggleFloatingActionButton(
                 modifier = Modifier
-                    .size(24.dp)
-                    .graphicsLayer {
-                        rotationZ = fabRotation
+                    .semantics {
+                        traversalIndex = -1f
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
                     }
+                    .animateFloatingActionButton(
+                        visible = visible || expanded,
+                        alignment = Alignment.BottomEnd
+                    ),
+                checked = expanded,
+                onCheckedChange = onExpandedChange
+            ) {
+                val imageVector by remember {
+                    derivedStateOf {
+                        if (checkedProgress > 0.5f) {
+                            Icons.Default.Close
+                        } else {
+                            RhythmIcons.Add
+                        }
+                    }
+                }
+                Icon(
+                    painter = rememberVectorPainter(imageVector),
+                    contentDescription = if (expanded) "Close playlist menu" else "Open playlist menu",
+                    modifier = Modifier.animateIcon({ checkedProgress })
+                )
+            }
+        }
+    ) {
+        menuItems.forEachIndexed { index, item ->
+            FloatingActionButtonMenuItem(
+                modifier = Modifier.semantics {
+                    isTraversalGroup = true
+                    if (index == menuItems.lastIndex) {
+                        customActions = listOf(
+                            CustomAccessibilityAction(
+                                label = "Close menu",
+                                action = {
+                                    onExpandedChange(false)
+                                    true
+                                }
+                            )
+                        )
+                    }
+                },
+                onClick = {
+                    HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.LongPress)
+                    item.third.invoke()
+                    onExpandedChange(false)
+                },
+                icon = {
+                    Icon(
+                        imageVector = item.second,
+                        contentDescription = null
+                    )
+                },
+                text = { Text(text = item.first) }
             )
         }
     }
