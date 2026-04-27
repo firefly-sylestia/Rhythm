@@ -3533,6 +3533,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 pausePlaybackTracking()
                 progressUpdateJob?.cancel()
+
+                // Persist pause position for resume-after-restart, but avoid wiping
+                // persisted queue state during early startup callbacks.
+                if (mediaController?.playWhenReady == false && _currentQueue.value.songs.isNotEmpty()) {
+                    saveQueueToPersistence()
+                }
             }
         }
         
