@@ -761,7 +761,7 @@ private fun LocalNavigationContent(
                 // Global MiniPlayer (hidden on full player screen) with bounce entrance animation
                 // Show at bottom on phones, or on right side if tablet miniplayer is enabled
                 AnimatedVisibility(
-                    visible = currentSong != null && currentRoute != Screen.Player.route,
+                    visible = showMiniPlayer,
                     enter = slideInVertically(
                         initialOffsetY = { fullHeight -> fullHeight },
                         animationSpec = spring(

@@ -415,7 +415,7 @@ object MediaUtils {
         var bitrate = "Unknown"
         var sampleRate = "Unknown"
         var format = "Unknown"
-        var dateAdded = 0L
+        var dateAdded = song.dateAdded
         var dateModified = 0L
         var filePath = ""
         var composer = ""
@@ -493,7 +493,12 @@ object MediaUtils {
 
                     filePath = cursor.getString(dataIndex) ?: ""
                     fileSize = cursor.getLong(sizeIndex)
-                    dateAdded = cursor.getLong(dateAddedIndex) * 1000 // Convert to milliseconds
+                    val mediaStoreDateAdded = cursor.getLong(dateAddedIndex) * 1000 // Convert to milliseconds
+                    dateAdded = when {
+                        dateAdded > 0L && mediaStoreDateAdded > 0L -> minOf(dateAdded, mediaStoreDateAdded)
+                        mediaStoreDateAdded > 0L -> mediaStoreDateAdded
+                        else -> dateAdded
+                    }
                     dateModified =
                         cursor.getLong(dateModifiedIndex) * 1000 // Convert to milliseconds
                     composer = cursor.getString(composerIndex) ?: ""

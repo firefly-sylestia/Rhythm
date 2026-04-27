@@ -29,6 +29,8 @@ import okhttp3.Request
 import com.google.gson.JsonParser
 import com.google.gson.Gson
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -123,6 +125,7 @@ class MusicRepository(context: Context) {
     // Genre cache using SharedPreferences
     private val genrePrefs: SharedPreferences by lazy { context.getSharedPreferences("genre_cache", Context.MODE_PRIVATE) }
     private val artworkPrefs: SharedPreferences by lazy { context.getSharedPreferences("artwork_overrides", Context.MODE_PRIVATE) }
+    private val dateAddedPrefs: SharedPreferences by lazy { context.getSharedPreferences("song_date_added_cache", Context.MODE_PRIVATE) }
     
     // Scan progress tracking
     private val _scanProgress = MutableStateFlow(ScanProgress(0, 0, "Idle"))
@@ -1026,6 +1029,49 @@ class MusicRepository(context: Context) {
         )
     }
 
+    private fun dateAddedCacheKeyForPath(filePath: String): String {
+        val normalizedPath = filePath
+            .trim()
+            .replace('\\', '/')
+            .lowercase(Locale.ROOT)
+
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(normalizedPath.toByteArray(Charsets.UTF_8))
+
+        val hex = buildString(digest.size * 2) {
+            digest.forEach { byte ->
+                append(((byte.toInt() ushr 4) and 0xF).toString(16))
+                append((byte.toInt() and 0xF).toString(16))
+            }
+        }
+
+        return "date_added_$hex"
+    }
+
+    private fun resolveStableDateAdded(filePath: String?, observedDateAddedMs: Long): Long {
+        val normalizedObservedDate = observedDateAddedMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+        val resolvedPath = filePath?.trim()?.takeIf { it.isNotBlank() } ?: return normalizedObservedDate
+
+        val key = try {
+            dateAddedCacheKeyForPath(resolvedPath)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to compute date-added cache key for path", e)
+            return normalizedObservedDate
+        }
+
+        val cachedDate = dateAddedPrefs.getLong(key, -1L)
+        if (cachedDate > 0L) {
+            val stableDate = minOf(cachedDate, normalizedObservedDate)
+            if (stableDate != cachedDate) {
+                dateAddedPrefs.edit().putLong(key, stableDate).apply()
+            }
+            return stableDate
+        }
+
+        dateAddedPrefs.edit().putLong(key, normalizedObservedDate).apply()
+        return normalizedObservedDate
+    }
+
     private fun createSongFromFile(file: File, appSettings: AppSettings): Song? {
         val retriever = android.media.MediaMetadataRetriever()
         return try {
@@ -1089,7 +1135,7 @@ class MusicRepository(context: Context) {
                 trackNumber = trackNumber,
                 year = year,
                 genre = null,
-                dateAdded = file.lastModified(),
+                dateAdded = resolveStableDateAdded(file.absolutePath, file.lastModified()),
                 albumArtist = albumArtist,
                 bitrate = null,
                 sampleRate = null,
@@ -1373,7 +1419,8 @@ class MusicRepository(context: Context) {
                 cursor.getInt(indices.discNumber).takeIf { it > 0 } ?: fallbackDiscInfo
             } else fallbackDiscInfo
             val year = cursor.getInt(indices.year)
-            val dateAdded = cursor.getLong(indices.dateAdded) * 1000L
+            val observedDateAdded = cursor.getLong(indices.dateAdded) * 1000L
+            val dateAdded = resolveStableDateAdded(filePath, observedDateAdded)
             val size = cursor.getLong(indices.size)
             val genreId = if (indices.genre >= 0) normalizeMetadataText(cursor.getString(indices.genre))?.trim() else null
             val albumArtist = if (indices.albumArtist >= 0) {

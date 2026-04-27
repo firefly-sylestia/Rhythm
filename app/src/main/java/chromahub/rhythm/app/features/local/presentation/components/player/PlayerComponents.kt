@@ -269,9 +269,9 @@ fun MiniPlayer(
             if (isPlaying) {
                 onPlayPause()
             }
-            delay(300) // Wait for animation to complete
             // Call the dismiss callback to hide the player
             onDismiss()
+            delay(300) // Keep short delay for local state reset if composable remains mounted
             // Reset local state
             isDismissingPlayer = false
             offsetY = 0f
