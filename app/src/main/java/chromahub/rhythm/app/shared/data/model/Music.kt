@@ -19,6 +19,7 @@ data class Song(
     val year: Int = 0,
     val genre: String? = null,
     val dateAdded: Long = System.currentTimeMillis(), // New field for date added
+    val dateModified: Long = System.currentTimeMillis(),
     val albumArtist: String? = null, // Album artist for grouping
     // Audio quality metadata
     val bitrate: Int? = null, // Bitrate in bps
@@ -45,6 +46,7 @@ data class Song(
         if (year != other.year) return false
         if (!Objects.equals(genre, other.genre)) return false
         if (dateAdded != other.dateAdded) return false
+        if (dateModified != other.dateModified) return false
         if (!Objects.equals(albumArtist, other.albumArtist)) return false
         if (!Objects.equals(bitrate, other.bitrate)) return false
         if (!Objects.equals(sampleRate, other.sampleRate)) return false
@@ -69,6 +71,7 @@ data class Song(
             year,
             genre,
             dateAdded,
+            dateModified,
             albumArtist,
             bitrate,
             sampleRate,

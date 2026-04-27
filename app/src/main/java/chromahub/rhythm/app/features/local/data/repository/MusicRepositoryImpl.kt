@@ -188,6 +188,7 @@ class MusicRepository(context: Context) {
                     year = song.year,
                     genre = song.genre,
                     dateAdded = song.dateAdded,
+                    dateModified = song.dateModified,
                     albumArtist = song.albumArtist,
                     bitrate = song.bitrate,
                     sampleRate = song.sampleRate,
@@ -344,6 +345,7 @@ class MusicRepository(context: Context) {
                         year = entity.year,
                         genre = entity.genre,
                         dateAdded = entity.dateAdded,
+                        dateModified = entity.dateModified.takeIf { it > 0L } ?: entity.dateAdded,
                         albumArtist = entity.albumArtist,
                         bitrate = entity.bitrate,
                         sampleRate = entity.sampleRate,
@@ -600,6 +602,7 @@ class MusicRepository(context: Context) {
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DATE_MODIFIED,
             MediaStore.Audio.Media.SIZE,
             MediaStore.Audio.Media.DATA // For path-based duplicate detection
         ).apply {
@@ -678,6 +681,7 @@ class MusicRepository(context: Context) {
                         track = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK),
                         year = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR),
                         dateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED),
+                        dateModified = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED),
                         size = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE),
                         // GENRE was added to MediaStore in API 30; use getColumnIndex (may be -1 on Android 8/9)
                         genre = cursor.getColumnIndex(MediaStore.Audio.Media.GENRE),
@@ -850,6 +854,7 @@ class MusicRepository(context: Context) {
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DATE_MODIFIED,
             MediaStore.Audio.Media.SIZE,
             MediaStore.Audio.Media.DATA
         ).apply {
@@ -892,6 +897,7 @@ class MusicRepository(context: Context) {
                         track = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK),
                         year = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR),
                         dateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED),
+                        dateModified = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED),
                         size = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE),
                         // GENRE column is optional; not available on all Android versions (pre-API 30)
                         genre = cursor.getColumnIndex(MediaStore.Audio.Media.GENRE),
@@ -967,6 +973,7 @@ class MusicRepository(context: Context) {
         val track: Int,
         val year: Int,
         val dateAdded: Int,
+        val dateModified: Int,
         val size: Int,
         val genre: Int,
         val albumArtist: Int, // May be -1 if not available on older devices
@@ -1136,6 +1143,7 @@ class MusicRepository(context: Context) {
                 year = year,
                 genre = null,
                 dateAdded = resolveStableDateAdded(file.absolutePath, file.lastModified()),
+                dateModified = file.lastModified(),
                 albumArtist = albumArtist,
                 bitrate = null,
                 sampleRate = null,
@@ -1421,6 +1429,11 @@ class MusicRepository(context: Context) {
             val year = cursor.getInt(indices.year)
             val observedDateAdded = cursor.getLong(indices.dateAdded) * 1000L
             val dateAdded = resolveStableDateAdded(filePath, observedDateAdded)
+            val observedDateModified = cursor.getLong(indices.dateModified) * 1000L
+            val dateModified = observedDateModified
+                .takeIf { it > 0L }
+                ?: observedDateAdded.takeIf { it > 0L }
+                ?: dateAdded
             val size = cursor.getLong(indices.size)
             val genreId = if (indices.genre >= 0) normalizeMetadataText(cursor.getString(indices.genre))?.trim() else null
             val albumArtist = if (indices.albumArtist >= 0) {
@@ -1516,6 +1529,7 @@ class MusicRepository(context: Context) {
                 trackNumber = track,
                 year = year,
                 dateAdded = dateAdded,
+                dateModified = dateModified,
                 genre = cachedGenre ?: genreId, // Use cached genre first, then MediaStore genre
                 albumArtist = albumArtist,
                 bitrate = null, // Will be extracted lazily when needed

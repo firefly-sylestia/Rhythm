@@ -6350,8 +6350,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 SortOrder.ARTIST_DESC -> _songs.value.sortedByDescending { it.artist }
                 SortOrder.DATE_ADDED_ASC -> _songs.value.sortedBy { it.dateAdded }
                 SortOrder.DATE_ADDED_DESC -> _songs.value.sortedByDescending { it.dateAdded }
-                SortOrder.DATE_MODIFIED_ASC -> _songs.value.sortedBy { it.dateAdded } // Using dateAdded as a proxy for dateModified for songs
-                SortOrder.DATE_MODIFIED_DESC -> _songs.value.sortedByDescending { it.dateAdded } // Using dateAdded as a proxy for dateModified for songs
+                SortOrder.DATE_MODIFIED_ASC -> _songs.value.sortedBy { it.dateModified }
+                SortOrder.DATE_MODIFIED_DESC -> _songs.value.sortedByDescending { it.dateModified }
             }
             
             // Sort albums based on current sort order
@@ -6405,8 +6405,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     SortOrder.ARTIST_DESC -> _songs.value.sortedByDescending { it.artist }
                     SortOrder.DATE_ADDED_ASC -> _songs.value.sortedBy { it.dateAdded }
                     SortOrder.DATE_ADDED_DESC -> _songs.value.sortedByDescending { it.dateAdded }
-                    SortOrder.DATE_MODIFIED_ASC -> _songs.value.sortedBy { it.dateAdded } // Using dateAdded as a proxy for dateModified for songs
-                    SortOrder.DATE_MODIFIED_DESC -> _songs.value.sortedByDescending { it.dateAdded } // Using dateAdded as a proxy for dateModified for songs
+                    SortOrder.DATE_MODIFIED_ASC -> _songs.value.sortedBy { it.dateModified }
+                    SortOrder.DATE_MODIFIED_DESC -> _songs.value.sortedByDescending { it.dateModified }
                 }
                 
                 // Sort albums based on new sort order

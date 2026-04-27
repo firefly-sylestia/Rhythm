@@ -17,6 +17,7 @@ data class SongEntity(
     val year: Int,
     val genre: String?,
     val dateAdded: Long,
+    val dateModified: Long,
     val albumArtist: String?,
     val bitrate: Int?,
     val sampleRate: Int?,
