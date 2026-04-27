@@ -1040,11 +1040,13 @@ class MusicRepository(context: Context) {
             } else {
                 selectBestMetadataText(extractedTitle, file.nameWithoutExtension)
             } ?: file.nameWithoutExtension
-            val artist = normalizeMetadataText(
+            val extractedArtist = normalizeMetadataText(
                 retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
             )
                 ?.trim()
-                ?.takeIf { it.isNotBlank() }
+            val artistFromVorbisComments = extractArtistFromVorbisCommentTags(file.absolutePath)
+            val artist = artistFromVorbisComments
+                ?: extractedArtist?.takeUnless { isUnknownArtistValue(it) }
                 ?: "Unknown Artist"
             val album = normalizeMetadataText(
                 retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM)
@@ -1104,6 +1106,146 @@ class MusicRepository(context: Context) {
                 // Ignore release exceptions.
             }
         }
+    }
+
+    private fun isUnknownArtistValue(value: String?): Boolean {
+        val normalized = value?.trim().orEmpty()
+        if (normalized.isBlank()) return true
+
+        return normalized.equals("<unknown>", ignoreCase = true) ||
+            normalized.equals("unknown", ignoreCase = true) ||
+            normalized.equals("unknown artist", ignoreCase = true)
+    }
+
+    private fun extractArtistFromVorbisCommentTags(filePath: String?): String? {
+        if (filePath.isNullOrBlank()) return null
+
+        val extension = filePath.substringAfterLast('.', "").lowercase()
+        if (extension !in setOf("opus", "ogg", "oga")) {
+            return null
+        }
+
+        val commentEntries = extractVorbisCommentEntriesFromOgg(filePath) ?: return null
+
+        val repeatedArtists = commentEntries
+            .asSequence()
+            .filter { it.first == "ARTISTS" }
+            .map { it.second.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .toList()
+
+        if (repeatedArtists.isNotEmpty()) {
+            return repeatedArtists.joinToString(" / ")
+        }
+
+        return commentEntries
+            .asSequence()
+            .firstOrNull { it.first == "ARTIST" && it.second.isNotBlank() }
+            ?.second
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun extractVorbisCommentEntriesFromOgg(filePath: String): List<Pair<String, String>>? {
+        return try {
+            val file = File(filePath)
+            if (!file.exists() || !file.canRead()) return null
+
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                val signature = ByteArray(4)
+                if (raf.read(signature) != 4 || String(signature, Charsets.ISO_8859_1) != "OggS") {
+                    return@use null
+                }
+
+                raf.seek(0)
+                val packetBuffer = ByteArrayOutputStream()
+                var pageCount = 0
+                val maxPages = 256
+
+                while (raf.filePointer < raf.length() && pageCount < maxPages) {
+                    pageCount++
+
+                    val pageSignature = ByteArray(4)
+                    if (raf.read(pageSignature) != 4) break
+                    if (String(pageSignature, Charsets.ISO_8859_1) != "OggS") {
+                        val nextOggS = findNextOggSPage(raf)
+                        if (nextOggS == -1L) break
+                        raf.seek(nextOggS)
+                        packetBuffer.reset()
+                        continue
+                    }
+
+                    // Skip version + header type + granule/serial/sequence/checksum.
+                    raf.skipBytes(2)
+                    raf.skipBytes(20)
+
+                    val segmentCount = raf.read()
+                    if (segmentCount < 0) break
+
+                    val segmentTable = ByteArray(segmentCount)
+                    if (raf.read(segmentTable) != segmentCount) break
+
+                    val pageSize = segmentTable.sumOf { it.toInt() and 0xFF }
+                    if (pageSize < 0 || pageSize > 1_000_000) {
+                        if (pageSize > 0) {
+                            raf.seek(raf.filePointer + pageSize)
+                        }
+                        packetBuffer.reset()
+                        continue
+                    }
+
+                    val pageData = ByteArray(pageSize)
+                    if (pageSize > 0 && raf.read(pageData) != pageSize) break
+
+                    var payloadOffset = 0
+                    for (segment in segmentTable) {
+                        val segmentLength = segment.toInt() and 0xFF
+
+                        if (segmentLength > 0) {
+                            if (payloadOffset + segmentLength > pageData.size) {
+                                packetBuffer.reset()
+                                break
+                            }
+
+                            packetBuffer.write(pageData, payloadOffset, segmentLength)
+                            payloadOffset += segmentLength
+                        }
+
+                        // A lacing value <255 marks the end of a packet.
+                        if (segmentLength < 255) {
+                            val packet = packetBuffer.toByteArray()
+                            packetBuffer.reset()
+
+                            val commentData = extractVorbisCommentDataFromPacket(packet) ?: continue
+                            return@use parseVorbisCommentEntries(commentData) ?: emptyList()
+                        }
+                    }
+                }
+
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract OGG/Opus comments from $filePath: ${e.message}")
+            null
+        }
+    }
+
+    private fun extractVorbisCommentDataFromPacket(packet: ByteArray): ByteArray? {
+        if (packet.size >= 8 &&
+            String(packet.copyOfRange(0, 8), Charsets.ISO_8859_1) == "OpusTags"
+        ) {
+            return packet.copyOfRange(8, packet.size)
+        }
+
+        if (packet.size >= 7 &&
+            packet[0] == 0x03.toByte() &&
+            String(packet.copyOfRange(1, 7), Charsets.ISO_8859_1) == "vorbis"
+        ) {
+            return packet.copyOfRange(7, packet.size)
+        }
+
+        return null
     }
     
     private fun normalizeMetadataText(value: String?): String? {
@@ -1190,8 +1332,13 @@ class MusicRepository(context: Context) {
             } else {
                 null
             }
-            val pathTitle = if (indices.data >= 0 && !cursor.isNull(indices.data)) {
-                File(cursor.getString(indices.data)).nameWithoutExtension
+            val filePath = if (indices.data >= 0 && !cursor.isNull(indices.data)) {
+                cursor.getString(indices.data)
+            } else {
+                null
+            }
+            val pathTitle = if (!filePath.isNullOrBlank()) {
+                File(filePath).nameWithoutExtension
                     .trim()
                     .takeIf { it.isNotBlank() }
             } else {
@@ -1203,11 +1350,14 @@ class MusicRepository(context: Context) {
             } else {
                 selectBestMetadataText(rawTitle, displayNameTitle, pathTitle)
             } ?: return null
-            val rawArtist = normalizeMetadataText(cursor.getString(indices.artist))?.trim() ?: "Unknown Artist"
-            
+            val rawArtist = normalizeMetadataText(cursor.getString(indices.artist))?.trim()
+            val artistFromVorbisComments = extractArtistFromVorbisCommentTags(filePath)
+
             // Keep the full artist string so songs appear under all their artists.
             // The display-time splitArtistNames logic handles splitting for grouping/filtering.
-            val artist = rawArtist
+            val artist = artistFromVorbisComments
+                ?: rawArtist?.takeUnless { isUnknownArtistValue(it) }
+                ?: "Unknown Artist"
             
             val album = normalizeMetadataText(cursor.getString(indices.album))?.trim() ?: "Unknown Album"
             val albumId = cursor.getLong(indices.albumId)
@@ -2623,65 +2773,70 @@ class MusicRepository(context: Context) {
      * Parse Vorbis comments to extract LYRICS or UNSYNCEDLYRICS tags
      */
     private fun parseVorbisComments(data: ByteArray): LyricsData? {
-        try {
+        val commentEntries = parseVorbisCommentEntries(data) ?: return null
+
+        for ((key, value) in commentEntries) {
+            if ((key == "LYRICS" || key == "UNSYNCEDLYRICS") && value.isNotBlank()) {
+                Log.d(TAG, "Found $key tag in Vorbis comments (${value.length} chars)")
+                return parseLyricsData(value)
+            }
+        }
+
+        return null
+    }
+
+    private fun parseVorbisCommentEntries(data: ByteArray): List<Pair<String, String>>? {
+        return try {
             var pos = 0
-            
-            // Read vendor string length (little-endian 32-bit)
+
+            // Read vendor string length (little-endian 32-bit).
             if (pos + 4 > data.size) return null
-            val vendorLength = (data[pos].toInt() and 0xFF) or
-                             ((data[pos + 1].toInt() and 0xFF) shl 8) or
-                             ((data[pos + 2].toInt() and 0xFF) shl 16) or
-                             ((data[pos + 3].toInt() and 0xFF) shl 24)
+            val vendorLength = readLittleEndianInt(data, pos)
             pos += 4
-            
-            // Skip vendor string
+
+            // Skip vendor string.
             if (vendorLength < 0 || pos + vendorLength > data.size) return null
             pos += vendorLength
-            
-            // Read number of comments
+
+            // Read number of comments.
             if (pos + 4 > data.size) return null
-            val commentCount = (data[pos].toInt() and 0xFF) or
-                             ((data[pos + 1].toInt() and 0xFF) shl 8) or
-                             ((data[pos + 2].toInt() and 0xFF) shl 16) or
-                             ((data[pos + 3].toInt() and 0xFF) shl 24)
+            val commentCount = readLittleEndianInt(data, pos)
             pos += 4
-            
-            if (commentCount < 0 || commentCount > 10000) return null // Safety limit
-            
-            // Parse each comment
+            if (commentCount < 0 || commentCount > 10_000) return null
+
+            val comments = mutableListOf<Pair<String, String>>()
             for (i in 0 until commentCount) {
                 if (pos + 4 > data.size) break
-                
-                val commentLength = (data[pos].toInt() and 0xFF) or
-                                  ((data[pos + 1].toInt() and 0xFF) shl 8) or
-                                  ((data[pos + 2].toInt() and 0xFF) shl 16) or
-                                  ((data[pos + 3].toInt() and 0xFF) shl 24)
+
+                val commentLength = readLittleEndianInt(data, pos)
                 pos += 4
-                
                 if (commentLength < 0 || pos + commentLength > data.size) break
-                
-                val commentBytes = data.copyOfRange(pos, pos + commentLength)
-                val comment = String(commentBytes, Charsets.UTF_8)
+
+                val comment = String(data, pos, commentLength, Charsets.UTF_8)
                 pos += commentLength
-                
-                // Check if this is a lyrics tag
+
                 val parts = comment.split("=", limit = 2)
                 if (parts.size == 2) {
                     val key = parts[0].uppercase()
-                    val value = parts[1]
-                    
-                    if ((key == "LYRICS" || key == "UNSYNCEDLYRICS") && value.isNotBlank()) {
-                        Log.d(TAG, "Found $key tag in Vorbis comments (${value.length} chars)")
-                        return parseLyricsData(value)
+                    val value = normalizeMetadataText(parts[1])?.trim().orEmpty()
+                    if (key.isNotBlank() && value.isNotBlank()) {
+                        comments.add(key to value)
                     }
                 }
             }
-            
-            return null
+
+            comments
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse Vorbis comments: ${e.message}")
-            return null
+            null
         }
+    }
+
+    private fun readLittleEndianInt(data: ByteArray, offset: Int): Int {
+        return (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8) or
+            ((data[offset + 2].toInt() and 0xFF) shl 16) or
+            ((data[offset + 3].toInt() and 0xFF) shl 24)
     }
     
     /**
