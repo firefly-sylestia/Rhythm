@@ -7,10 +7,8 @@ import chromahub.rhythm.app.core.domain.model.PlayableItem
 import chromahub.rhythm.app.core.domain.model.PlaylistItem
 import chromahub.rhythm.app.core.domain.model.SourceType
 import chromahub.rhythm.app.features.streaming.data.provider.JellyfinApiClient
-import chromahub.rhythm.app.features.streaming.data.provider.NeteaseApiClient
 import chromahub.rhythm.app.features.streaming.data.provider.ProviderConnectionResult
 import chromahub.rhythm.app.features.streaming.data.provider.ProviderSong
-import chromahub.rhythm.app.features.streaming.data.provider.QqMusicApiClient
 import chromahub.rhythm.app.features.streaming.data.provider.SubsonicApiClient
 import chromahub.rhythm.app.features.streaming.domain.model.BrowseCategory
 import chromahub.rhythm.app.features.streaming.domain.model.StreamingAlbum
@@ -41,8 +39,6 @@ class StreamingMusicRepositoryImpl(
 
     private val subsonicClient = SubsonicApiClient(context)
     private val jellyfinClient = JellyfinApiClient(context)
-    private val neteaseClient = NeteaseApiClient(context)
-    private val qqMusicClient = QqMusicApiClient(context)
 
     private val songsFlow = MutableStateFlow<List<PlayableItem>>(emptyList())
     private val albumsFlow = MutableStateFlow<List<AlbumItem>>(emptyList())
@@ -74,14 +70,6 @@ class StreamingMusicRepositoryImpl(
         val result = when (normalizedService) {
             StreamingServiceId.SUBSONIC -> subsonicClient.login(serverUrl, username, password)
             StreamingServiceId.JELLYFIN -> jellyfinClient.login(serverUrl, username, password)
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> {
-                val cookieInput = resolveCookieInput(username, password)
-                neteaseClient.login(cookieInput, username)
-            }
-            StreamingServiceId.QQ_MUSIC -> {
-                val cookieInput = resolveCookieInput(username, password)
-                qqMusicClient.login(cookieInput, username)
-            }
             else -> Result.failure(IllegalArgumentException("Unsupported streaming service"))
         }
 
@@ -96,8 +84,6 @@ class StreamingMusicRepositoryImpl(
         when (normalizeServiceId(serviceId)) {
             StreamingServiceId.SUBSONIC -> subsonicClient.logout()
             StreamingServiceId.JELLYFIN -> jellyfinClient.logout()
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> neteaseClient.logout()
-            StreamingServiceId.QQ_MUSIC -> qqMusicClient.logout()
         }
 
         if (activeServiceId() == normalizeServiceId(serviceId)) {
@@ -109,8 +95,6 @@ class StreamingMusicRepositoryImpl(
         return when (normalizeServiceId(serviceId)) {
             StreamingServiceId.SUBSONIC -> subsonicClient.isConnected()
             StreamingServiceId.JELLYFIN -> jellyfinClient.isConnected()
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> neteaseClient.isConnected()
-            StreamingServiceId.QQ_MUSIC -> qqMusicClient.isConnected()
             else -> false
         }
     }
@@ -123,8 +107,6 @@ class StreamingMusicRepositoryImpl(
         return when (activeServiceId()) {
             StreamingServiceId.SUBSONIC -> subsonicClient.ping().isSuccess
             StreamingServiceId.JELLYFIN -> jellyfinClient.ping().isSuccess
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> neteaseClient.isConnected()
-            StreamingServiceId.QQ_MUSIC -> qqMusicClient.isConnected()
             else -> false
         }
     }
@@ -237,11 +219,6 @@ class StreamingMusicRepositoryImpl(
         val resolved = when (serviceId) {
             StreamingServiceId.SUBSONIC -> subsonicClient.buildStreamUrl(providerId, bitrate)
             StreamingServiceId.JELLYFIN -> jellyfinClient.buildStreamUrl(providerId, bitrate)
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> {
-                val neteaseId = providerId.toLongOrNull() ?: return null
-                neteaseClient.getSongUrl(neteaseId, neteaseQualityLevel()).getOrNull()
-            }
-            StreamingServiceId.QQ_MUSIC -> qqMusicClient.getSongUrl(providerId).getOrNull()
             else -> null
         }
 
@@ -290,8 +267,6 @@ class StreamingMusicRepositoryImpl(
         val providerResult: Result<List<ProviderSong>> = when (serviceId) {
             StreamingServiceId.SUBSONIC -> subsonicClient.searchSongs(query, SEARCH_LIMIT)
             StreamingServiceId.JELLYFIN -> jellyfinClient.searchSongs(query, SEARCH_LIMIT)
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> neteaseClient.searchSongs(query, SEARCH_LIMIT)
-            StreamingServiceId.QQ_MUSIC -> qqMusicClient.searchSongs(query, SEARCH_LIMIT)
             else -> Result.success(emptyList())
         }
 
@@ -503,15 +478,6 @@ class StreamingMusicRepositoryImpl(
         }
     }
 
-    private fun neteaseQualityLevel(): String {
-        return when (appSettings.streamingQuality.value.uppercase()) {
-            "LOW" -> "standard"
-            "NORMAL" -> "higher"
-            "HIGH" -> "exhigh"
-            "LOSSLESS" -> "lossless"
-            else -> "exhigh"
-        }
-    }
 
     private fun resolveCookieInput(username: String, password: String): String {
         return when {
@@ -530,8 +496,6 @@ class StreamingMusicRepositoryImpl(
         return when (serviceId) {
             StreamingServiceId.SUBSONIC -> SourceType.SUBSONIC
             StreamingServiceId.JELLYFIN -> SourceType.JELLYFIN
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> SourceType.NETEASE_CLOUD_MUSIC
-            StreamingServiceId.QQ_MUSIC -> SourceType.QQ_MUSIC
             else -> SourceType.UNKNOWN
         }
     }
@@ -546,7 +510,7 @@ class StreamingMusicRepositoryImpl(
     }
 
     private companion object {
-        private const val SEARCH_LIMIT = 60
+        private const val SEARCH_LIMIT = 100
         private const val MAX_CACHE_SIZE = 4000
     }
 }

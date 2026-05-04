@@ -720,6 +720,7 @@ fun PlayerScreen(
     // Calculate current and total time
     val currentTimeMs = ((song?.duration ?: 0) * progress).toLong()
     val totalTimeMs = song?.duration ?: 0
+    val canSeek = totalTimeMs > 0
     
     // Calculate scrub preview time when enhanced seeking is active
     val scrubTimeMs = ((song?.duration ?: 0) * scrubProgress).toLong()
@@ -2349,15 +2350,15 @@ fun PlayerScreen(
                                 WaveSlider(
                                     value = if (isScrubbing && enhancedSeekingEnabled) scrubProgress else progress,
                                     onValueChange = { newValue ->
-                                        if (enhancedSeekingEnabled) {
+                                        if (canSeek && enhancedSeekingEnabled) {
                                             isScrubbing = true
                                             scrubProgress = newValue
-                                        } else {
+                                        } else if (canSeek) {
                                             onSeek(newValue)
                                         }
                                     },
                                     onValueChangeFinished = {
-                                        if (enhancedSeekingEnabled && isScrubbing) {
+                                        if (canSeek && enhancedSeekingEnabled && isScrubbing) {
                                             onSeek(scrubProgress)
                                             isScrubbing = false
                                         }
@@ -2365,6 +2366,7 @@ fun PlayerScreen(
                                     modifier = Modifier
                                         .weight(1f)
                                         .padding(horizontal = 8.dp),
+                                    enabled = canSeek,
                                     isPlaying = isPlaying,
                                     activeTrackColor = MaterialTheme.colorScheme.primary,
                                     inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
@@ -2434,20 +2436,21 @@ fun PlayerScreen(
                                     androidx.compose.material3.Slider(
                                         value = if (isScrubbing && enhancedSeekingEnabled) scrubProgress else progress,
                                         onValueChange = { newValue ->
-                                            if (enhancedSeekingEnabled) {
+                                            if (canSeek && enhancedSeekingEnabled) {
                                                 isScrubbing = true
                                                 scrubProgress = newValue
-                                            } else {
+                                            } else if (canSeek) {
                                                 onSeek(newValue)
                                             }
                                         },
                                         onValueChangeFinished = {
-                                            if (enhancedSeekingEnabled && isScrubbing) {
+                                            if (canSeek && enhancedSeekingEnabled && isScrubbing) {
                                                 onSeek(scrubProgress)
                                                 isScrubbing = false
                                             }
                                         },
                                         modifier = Modifier.fillMaxWidth(),
+                                        enabled = canSeek,
                                         colors = SliderDefaults.colors(
                                             thumbColor = Color.Transparent,
                                             activeTrackColor = Color.Transparent,
@@ -2487,7 +2490,7 @@ fun PlayerScreen(
                         // Full width container with same padding as toggle buttons
                         chromahub.rhythm.app.shared.presentation.components.common.ExpressivePlayerControlGroup(
                             isPlaying = isPlaying && !showLoaderInPlayPauseButton,
-                            showSeekButtons = playerShowSeekButtons,
+                            showSeekButtons = playerShowSeekButtons && canSeek,
                             onPrevious = {
                                 HapticUtils.performHapticFeedback(
                                     context,
@@ -2513,26 +2516,30 @@ fun PlayerScreen(
                                 onSkipNext()
                             },
                             onSeekBack = {
-                                HapticUtils.performHapticFeedback(
-                                    context,
-                                    haptic,
-                                    HapticFeedbackType.LongPress
-                                )
-                                onSeek(
-                                    (currentTimeMs - 10000).coerceAtLeast(0L)
-                                        .toFloat() / totalTimeMs
-                                )
+                                if (canSeek) {
+                                    HapticUtils.performHapticFeedback(
+                                        context,
+                                        haptic,
+                                        HapticFeedbackType.LongPress
+                                    )
+                                    onSeek(
+                                        (currentTimeMs - 10000).coerceAtLeast(0L)
+                                            .toFloat() / totalTimeMs
+                                    )
+                                }
                             },
                             onSeekForward = {
-                                HapticUtils.performHapticFeedback(
-                                    context,
-                                    haptic,
-                                    HapticFeedbackType.LongPress
-                                )
-                                onSeek(
-                                    (currentTimeMs + 10000).coerceAtMost(totalTimeMs.toLong())
-                                        .toFloat() / totalTimeMs
-                                )
+                                if (canSeek) {
+                                    HapticUtils.performHapticFeedback(
+                                        context,
+                                        haptic,
+                                        HapticFeedbackType.LongPress
+                                    )
+                                    onSeek(
+                                        (currentTimeMs + 10000).coerceAtMost(totalTimeMs.toLong())
+                                            .toFloat() / totalTimeMs
+                                    )
+                                }
                             },
                             isExtraSmallWidth = isExtraSmallWidth,
                             isCompactWidth = isCompactWidth,

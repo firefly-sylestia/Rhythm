@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -685,6 +686,6 @@ private fun getFormatIcon(format: PlaylistImportExportUtils.PlaylistExportFormat
         PlaylistImportExportUtils.PlaylistExportFormat.JSON -> Icons.Rounded.Code
         PlaylistImportExportUtils.PlaylistExportFormat.M3U,
         PlaylistImportExportUtils.PlaylistExportFormat.M3U8 -> Icons.Rounded.PlaylistPlay
-        PlaylistImportExportUtils.PlaylistExportFormat.PLS -> Icons.Rounded.QueueMusic
+        PlaylistImportExportUtils.PlaylistExportFormat.PLS -> Icons.AutoMirrored.Rounded.QueueMusic
     }
 }

@@ -37,15 +37,64 @@ class TransitionController(
         private const val TAG = "TransitionController"
     }
 
+    interface TransitionListener {
+        fun onTransitionCompleted()
+        fun onTransitionCancelled()
+    }
+
+    enum class TransitionState {
+        IDLE,
+        SCHEDULED,
+        PREPARING,
+        TRANSITIONING,
+        CLEANUP
+    }
+
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var transitionListener: Player.Listener? = null
     private var transitionSchedulerJob: Job? = null
     private var currentObservedPlayer: Player? = null
     private var scheduleGeneration: Long = 0L
+    private var currentState: TransitionState = TransitionState.IDLE
+    private var completionListener: TransitionListener? = null
+
+    fun setTransitionListener(listener: TransitionListener) {
+        completionListener = listener
+    }
 
     private fun nextScheduleGeneration(): Long {
         scheduleGeneration += 1L
         return scheduleGeneration
+    }
+
+    private fun setState(newState: TransitionState) {
+        Log.d(TAG, "Transition state: $currentState -> $newState")
+        currentState = newState
+        
+        if (newState == TransitionState.IDLE) {
+            completionListener?.onTransitionCompleted()
+        }
+    }
+
+    /**
+     * Check if currently in a destructive state where cancellation would cause issues
+     */
+    fun isInDestructiveState(): Boolean {
+        return currentState == TransitionState.TRANSITIONING || currentState == TransitionState.CLEANUP
+    }
+
+    /**
+     * Update state based on engine status
+     */
+    fun updateTransitionState() {
+        if (currentState == TransitionState.TRANSITIONING && !engine.isTransitionRunning()) {
+            setState(TransitionState.CLEANUP)
+            // Reset to IDLE after a short delay to allow cleanup
+            scope.launch {
+                kotlinx.coroutines.delay(100)
+                setState(TransitionState.IDLE)
+            }
+        }
     }
 
     private fun invalidateScheduledTransitions() {
@@ -103,6 +152,10 @@ class TransitionController(
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                    if (isInDestructiveState()) {
+                        Log.d(TAG, "Timeline changed (reason=$reason). Ignore cancellation since transitioning.")
+                        return
+                    }
                     Log.d(TAG, "Timeline changed (reason=$reason). Cancelling pending transition.")
                     invalidateScheduledTransitions()
                     transitionSchedulerJob?.cancel()
@@ -112,6 +165,10 @@ class TransitionController(
             }
 
             override fun onRepeatModeChanged(repeatMode: Int) {
+                if (isInDestructiveState()) {
+                    Log.d(TAG, "Repeat mode changed. Ignore cancellation since transitioning.")
+                    return
+                }
                 Log.d(TAG, "Repeat mode changed to $repeatMode. Rescheduling transition.")
                 invalidateScheduledTransitions()
                 transitionSchedulerJob?.cancel()
@@ -137,10 +194,16 @@ class TransitionController(
      * 6. Polls playback position until the transition point, then fires
      */
     private fun scheduleTransitionFor(currentMediaItem: MediaItem) {
+        if (currentState == TransitionState.TRANSITIONING) {
+            Log.d(TAG, "Cannot schedule new transition while actively transitioning")
+            return
+        }
+
         val expectedMediaId = currentMediaItem.mediaId
         val generation = nextScheduleGeneration()
         transitionSchedulerJob?.cancel()
 
+        setState(TransitionState.SCHEDULED)
         transitionSchedulerJob = scope.launch {
             // Wait for any active transition to finish
             while (engine.isTransitionRunning()) {
@@ -162,8 +225,11 @@ class TransitionController(
 
             if (repeatMode == Player.REPEAT_MODE_ONE && !appSettings.crossfadeRepeatOne.value) {
                 Log.d(TAG, "Repeat-one active and crossfade-for-repeat-one disabled. Skipping transition.")
-                engine.cancelNext()
+                if (currentState != TransitionState.TRANSITIONING) {
+                    engine.cancelNext()
+                }
                 engine.setPauseAtEndOfMediaItems(false)
+                setState(TransitionState.IDLE)
                 return@launch
             }
             
@@ -198,7 +264,10 @@ class TransitionController(
 
             if (nextMediaItem == null) {
                 Log.d(TAG, "No next track (repeat=$repeatMode). No transition.")
-                engine.cancelNext()
+                if (currentState != TransitionState.TRANSITIONING) {
+                    engine.cancelNext()
+                }
+                setState(TransitionState.IDLE)
                 return@launch
             }
 
@@ -208,6 +277,7 @@ class TransitionController(
             }
 
             Log.d(TAG, "Preparing next track: ${nextMediaItem.mediaId}")
+            setState(TransitionState.PREPARING)
             engine.prepareNext(nextMediaItem)
 
             // Check if crossfade is globally enabled
@@ -300,6 +370,7 @@ class TransitionController(
             }
 
             if (isActive && isLatestSchedule(generation, expectedMediaId, player)) {
+                setState(TransitionState.TRANSITIONING)
                 Log.d(TAG, "FIRING TRANSITION NOW!")
                 engine.performTransition(settings.copy(durationMs = effectiveDuration.toInt()))
             } else {

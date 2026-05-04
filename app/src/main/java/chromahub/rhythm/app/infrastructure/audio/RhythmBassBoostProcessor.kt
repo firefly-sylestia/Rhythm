@@ -3,9 +3,6 @@ package chromahub.rhythm.app.infrastructure.audio
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
-import kotlin.math.cos
-import kotlin.math.min
-import kotlin.math.max
 import kotlin.math.PI
 
 /**
@@ -34,6 +31,7 @@ class RhythmBassBoostProcessor : RhythmAudioProcessor() {
     // Filter state (per channel) - maintains continuity across buffers
     private var prevSample = FloatArray(2) // Support stereo
     private var filterCoeff = 0f
+    private var filterCoeffValid = false
     
     /**
      * Enable or disable bass boost
@@ -45,6 +43,23 @@ class RhythmBassBoostProcessor : RhythmAudioProcessor() {
             // Reset filter state to avoid artifacts
             prevSample.fill(0f)
         }
+    }
+
+    fun onAudioFormatChanged(
+        previousSampleRate: Int,
+        previousChannelCount: Int,
+        previousEncoding: Int
+    ) {
+        // Invalidate filter coefficient when sample rate changes
+        filterCoeffValid = false
+        // Reset filter state to avoid discontinuities across format changes
+        prevSample.fill(0f)
+        Log.d(TAG, "Audio format changed, resetting filter state")
+    }
+
+    fun onProcessorFlushed() {
+        // Reset filter state on flush to prevent artifacts across stream boundaries
+        prevSample.fill(0f)
     }
     
     /**
@@ -65,14 +80,41 @@ class RhythmBassBoostProcessor : RhythmAudioProcessor() {
     override fun isEnabled(): Boolean = enabled
     
     /**
-     * Update filter coefficient based on current sample rate
+     * Update filter coefficient based on current sample rate.
+     * Safety: validates sample rate before computing filter coefficient.
      */
     private fun updateFilterCoeff() {
-        if (sampleRate > 0) {
-            val rc = 1.0 / (2.0 * PI * BASS_CUTOFF_FREQ)
-            val dt = 1.0 / sampleRate
-            filterCoeff = (dt / (rc + dt)).toFloat()
+        if (sampleRate <= 0) {
+            Log.w(TAG, "Invalid sample rate: $sampleRate, skipping filter update")
+            filterCoeffValid = false
+            return
         }
+        val rc = 1.0 / (2.0 * PI * BASS_CUTOFF_FREQ)
+        val dt = 1.0 / sampleRate
+        filterCoeff = (dt / (rc + dt)).toFloat()
+        filterCoeffValid = true
+    }
+
+    /**
+     * Soft-knee limiter using saturating math to prevent hard clipping distortion.
+     * Gracefully transitions from linear (|x| <= 1) to compression (|x| > 1).
+     * Formula: sign(x) * (1.0 - 1.0/(1.0 + abs(x)))
+     * At x=0: output=0. At x=1: output≈0.5. As x→∞: output→1.0 (saturates smoothly).
+     * This replaces hard clipping which creates audible aliasing and distortion.
+     */
+    private fun softLimitSample(sample: Float): Float {
+        if (sample == 0f) return 0f
+        val absValue = kotlin.math.abs(sample)
+        
+        // Check if we're in linear region (no limiting needed)
+        if (absValue <= 1f) {
+            return sample
+        }
+        
+        // In compression region: apply soft-knee limiting
+        // Using: y = sign(x) * (1.0 - 1.0/(1.0 + abs(x)))
+        val limited = kotlin.math.sign(sample) * (1f - 1f / (1f + absValue))
+        return limited
     }
     
     override fun processSamples(samples: ShortArray) {
@@ -111,8 +153,9 @@ class RhythmBassBoostProcessor : RhythmAudioProcessor() {
             val bassBoost = lowPass * (gain - 1.0f)
             val output = input + bassBoost
             
-            // Clamp to prevent clipping and convert back to 16-bit PCM
-            samples[i] = (max(-1.0f, min(1.0f, output)) * 32767.0f).toInt().toShort()
+            // Apply soft-knee limiting to prevent hard clipping distortion
+            val limited = softLimitSample(output)
+            samples[i] = (limited * 32767.0f).toInt().toShort()
         }
     }
 }

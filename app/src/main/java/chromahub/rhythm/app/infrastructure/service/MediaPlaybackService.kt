@@ -1032,15 +1032,15 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         applyUsbExclusiveRoutingPreference()
 
         player.apply {
-            // Apply audio normalization
-            if (appSettings.audioNormalization.value) {
-                volume = 1.0f
-            }
+            // Audio normalization - NOT IMPLEMENTED
+            // if (appSettings.audioNormalization.value) {
+            //     volume = 1.0f
+            // }
 
-            // Apply replay gain if enabled
-            if (appSettings.replayGain.value) {
-                Log.d(TAG, "Replay gain enabled")
-            }
+            // Replay gain - NOT IMPLEMENTED
+            // if (appSettings.replayGain.value) {
+            //     Log.d(TAG, "Replay gain enabled")
+            // }
         }
 
         // Apply gapless playback setting
@@ -1052,9 +1052,8 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         Log.d(TAG, "Applied player settings: " +
                 "HQ Audio=${appSettings.highQualityAudio.value}, " +
                 "Gapless=${appSettings.gaplessPlayback.value}, " +
-                "Crossfade=${appSettings.crossfade.value} (${appSettings.crossfadeDuration.value}s), " +
-                "Normalization=${appSettings.audioNormalization.value}, " +
-                "ReplayGain=${appSettings.replayGain.value}")
+                "Crossfade=${appSettings.crossfade.value} (${appSettings.crossfadeDuration.value}s)")
+                // Normalization and ReplayGain removed as not implemented
     }
     
     // Crossfade is now handled by RhythmPlayerEngine + TransitionController

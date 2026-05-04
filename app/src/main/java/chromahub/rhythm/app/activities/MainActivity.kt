@@ -164,13 +164,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        appSettings = AppSettings.getInstance(applicationContext) // Initialize AppSettings
-        
-        // Initialize NetworkClient with AppSettings for dynamic API keys
-        chromahub.rhythm.app.network.NetworkClient.initialize(appSettings)
-
-        // Initialize CrashReporter
-        CrashReporter.init(application)
+        appSettings = AppSettings.getInstance(applicationContext) // AppSettings already initialized in Application
         
         // We'll delay intent handling until after initialization
         val startupIntent = intent
@@ -541,7 +535,11 @@ class MainActivity : ComponentActivity() {
             }
             
             // Wait for service to be ready
-            delay(1000)
+            var attempts = 0
+            while (attempts < 10 && !musicViewModel.isServiceConnected()) {
+                delay(100)
+                attempts++
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start media service", e)
@@ -608,6 +606,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,

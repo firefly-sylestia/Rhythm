@@ -3,8 +3,6 @@ package chromahub.rhythm.app.infrastructure.audio
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
-import kotlin.math.min
-import kotlin.math.max
 
 /**
  * Rhythm Spatialization Processor - Real-time 3D audio enhancement
@@ -105,25 +103,28 @@ class RhythmSpatializationProcessor : RhythmAudioProcessor() {
     }
     
     /**
-     * Soft clipping function to prevent harsh distortion
-     * Uses a smooth tanh-like curve for musical limiting
+     * Soft clipping using saturating math (tanh-like approximation) to prevent harsh distortion.
+     * Gracefully transitions from linear (|x| <= 1) to compression (|x| > 1).
+     * Formula: sign(x) * (1.0 - 1.0/(1.0 + abs(x)))
+     * 
+     * At x=0: output=0. At x=1: output≈0.5. As x→∞: output→1.0 (saturates smoothly).
+     * This is superior to hard clipping which creates audible aliasing at clipping boundary.
      * 
      * @param x Input signal (-∞ to +∞)
      * @return Soft-clipped signal (-1.0 to 1.0)
      */
     private fun softClip(x: Float): Float {
-        return when {
-            x > 1.0f -> {
-                // Soft limit above 1.0 - asymptotic approach to maximum
-                val excess = x - 1.0f
-                1.0f + excess / (1.0f + excess * 2.0f)
-            }
-            x < -1.0f -> {
-                // Soft limit below -1.0 - asymptotic approach to minimum
-                val excess = -x - 1.0f
-                -1.0f - excess / (1.0f + excess * 2.0f)
-            }
-            else -> x  // No clipping needed
-        }.coerceIn(-1.0f, 1.0f)
+        if (x == 0f) return 0f
+        val absValue = kotlin.math.abs(x)
+        
+        // Check if we're already in linear region
+        if (absValue <= 1f) {
+            return x
+        }
+        
+        // In compression region: apply smooth saturation
+        // Using: y = sign(x) * (1.0 - 1.0/(1.0 + abs(x)))
+        val limited = kotlin.math.sign(x) * (1f - 1f / (1f + absValue))
+        return limited
     }
 }

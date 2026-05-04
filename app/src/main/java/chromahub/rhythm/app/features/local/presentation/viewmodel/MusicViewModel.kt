@@ -48,6 +48,7 @@ import chromahub.rhythm.app.util.EqualizerUtils
 import chromahub.rhythm.app.util.GsonUtils
 import chromahub.rhythm.app.util.MediaUtils
 import chromahub.rhythm.app.util.PlaylistImportExportUtils
+import chromahub.rhythm.app.util.PlaybackCommandSerializer
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.Job
@@ -159,6 +160,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     
     // Queue state manager
     private val queueStateHolder = QueueStateHolder()
+    
+    // Playback command serializer for deterministic queue operations
+    private val commandSerializer = PlaybackCommandSerializer()
     
     // Settings
     val showLyrics = appSettings.showLyrics
@@ -3797,6 +3801,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 
                 if (song != null) {
+                    song = enrichSongDuration(song, controller.duration)
                     val previousSongId = _currentSong.value?.id
                     if (previousSongId != song.id) {
                         resetBluetoothLyricsBroadcastState(clearLastBroadcast = true)
@@ -3900,6 +3905,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun enrichSongDuration(song: Song, controllerDuration: Long): Song {
+        if (song.duration > 0L || controllerDuration <= 0L) {
+            return song
+        }
+
+        return song.copy(duration = controllerDuration)
+    }
+
     private fun resolveSongFromMediaItem(mediaItem: MediaItem): Song? {
         val mediaId = mediaItem.mediaId
         val queuedSong = if (mediaId.isNotBlank()) {
@@ -3909,7 +3922,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         return _songs.value.find { it.id == mediaId }
-            ?: queuedSong
+            ?.let { enrichSongDuration(it, mediaController?.duration ?: 0L) }
+            ?: queuedSong?.let { enrichSongDuration(it, mediaController?.duration ?: 0L) }
             ?: mediaItemToTransientSong(mediaItem)
     }
 
@@ -5131,11 +5145,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleShuffle() {
-        mediaController?.let { controller ->
+        commandSerializer.executeCommand {
+            mediaController?.let { controller ->
             // Don't allow shuffle toggle if queue is empty
             if (_currentQueue.value.songs.isEmpty()) {
                 Log.w(TAG, "Cannot toggle shuffle - queue is empty")
-                return
+                return@executeCommand
             }
 
             val currentSongs = _currentQueue.value.songs
@@ -5221,7 +5236,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     _isShuffleEnabled.value = false
                     syncQueueWithMediaController()
                     saveQueueToPersistence()
-                    return
+                    return@executeCommand
                 }
 
                 val baseOriginalQueue = queueStateHolder.getFilteredOriginalQueue(currentSongs)
@@ -5237,7 +5252,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     _isShuffleEnabled.value = false
                     syncQueueWithMediaController()
                     saveQueueToPersistence()
-                    return
+                    return@executeCommand
                 }
 
                 // Use bulk replace for large queues to avoid UI freeze
@@ -5260,6 +5275,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     controller.play()
                 }
             }
+        }
         }
     }
 

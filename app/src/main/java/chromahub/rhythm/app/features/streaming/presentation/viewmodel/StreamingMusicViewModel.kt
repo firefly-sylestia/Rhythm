@@ -34,6 +34,8 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
     private val repository = StreamingMusicModule.provideStreamingMusicRepository(application)
     private val providerRepository = repository as? StreamingMusicRepositoryImpl
     private var playbackHandler: ((List<StreamingSong>, Int) -> Unit)? = null
+    private var seekProgressHandler: ((Float) -> Unit)? = null
+    private var seekPositionHandler: ((Long) -> Unit)? = null
 
     
     // Authentication state
@@ -264,6 +266,14 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
     fun setPlaybackHandler(handler: (List<StreamingSong>, Int) -> Unit) {
         playbackHandler = handler
     }
+
+    fun setSeekHandlers(
+        progressHandler: (Float) -> Unit,
+        positionHandler: (Long) -> Unit
+    ) {
+        seekProgressHandler = progressHandler
+        seekPositionHandler = positionHandler
+    }
     
     /**
      * Load home screen content.
@@ -278,7 +288,7 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
                     return@launch
                 }
 
-                val seedSongs = seedSongsFromService(limit = 80)
+                val seedSongs = seedSongsFromService(limit = 120)
 
                 var recommendations = repository.getRecommendations(limit = 24)
                 if (recommendations.isEmpty()) {
@@ -390,7 +400,7 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
                 val seedSongs = if (hasExplicitLibraryData) {
                     emptyList()
                 } else {
-                    seedSongsFromService(limit = 120)
+                    seedSongsFromService(limit = 240)
                 }
 
                 val mergedSongs = (likedSongs + downloadedSongs + seedSongs)
@@ -789,7 +799,11 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
      */
     fun seekTo(progress: Float) {
         _progress.value = progress
-        // TODO: Connect to MediaPlaybackService
+        seekProgressHandler?.invoke(progress)
+    }
+
+    fun seekTo(positionMs: Long) {
+        seekPositionHandler?.invoke(positionMs)
     }
 
     /**
@@ -898,16 +912,35 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private suspend fun seedSongsFromService(limit: Int): List<StreamingSong> {
-        val seedQueries = listOf("", "a", "the", "love")
+        val seedQueries = listOf(
+            "",
+            "a",
+            "e",
+            "i",
+            "o",
+            "u",
+            "the",
+            "love",
+            "mix",
+            "live",
+            "remix"
+        )
+        val uniqueSongs = LinkedHashMap<String, StreamingSong>()
+        val safeLimit = limit.coerceAtLeast(1)
+
         for (query in seedQueries) {
             val songs = repository.searchSongs(query)
                 .filterIsInstance<StreamingSong>()
                 .distinctBy { it.id }
-            if (songs.isNotEmpty()) {
-                return songs.take(limit.coerceAtLeast(1))
+            for (song in songs) {
+                uniqueSongs.putIfAbsent(song.id, song)
+                if (uniqueSongs.size >= safeLimit) {
+                    return uniqueSongs.values.take(safeLimit).toList()
+                }
             }
         }
-        return emptyList()
+
+        return uniqueSongs.values.take(safeLimit).toList()
     }
 
     private fun deriveAlbumsFromSongs(
@@ -1041,8 +1074,7 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
         if (StreamingServiceRules.requiresServerUrl(serviceId) && serverUrl.isBlank()) {
             throw IllegalArgumentException("Server URL is required")
         }
-        val requiresUsername = serviceId != StreamingServiceId.NETEASE_CLOUD_MUSIC &&
-            serviceId != StreamingServiceId.QQ_MUSIC
+        val requiresUsername = true
         if (requiresUsername && username.isBlank()) {
             throw IllegalArgumentException("Username is required")
         }
@@ -1055,8 +1087,6 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
         return when (serviceId.uppercase()) {
             StreamingServiceId.SUBSONIC -> SourceType.SUBSONIC
             StreamingServiceId.JELLYFIN -> SourceType.JELLYFIN
-            StreamingServiceId.NETEASE_CLOUD_MUSIC -> SourceType.NETEASE_CLOUD_MUSIC
-            StreamingServiceId.QQ_MUSIC -> SourceType.QQ_MUSIC
             else -> SourceType.UNKNOWN
         }
     }
@@ -1065,8 +1095,6 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
         return when (sourceType) {
             SourceType.SUBSONIC -> StreamingServiceId.SUBSONIC
             SourceType.JELLYFIN -> StreamingServiceId.JELLYFIN
-            SourceType.NETEASE_CLOUD_MUSIC -> StreamingServiceId.NETEASE_CLOUD_MUSIC
-            SourceType.QQ_MUSIC -> StreamingServiceId.QQ_MUSIC
             SourceType.SPOTIFY,
             SourceType.APPLE_MUSIC,
             SourceType.YOUTUBE_MUSIC,

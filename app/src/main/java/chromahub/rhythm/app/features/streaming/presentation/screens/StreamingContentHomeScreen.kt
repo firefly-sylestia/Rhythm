@@ -37,7 +37,7 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
@@ -1291,7 +1291,9 @@ private fun StreamingAlbumWidgetCard(
             HapticUtils.performHapticFeedback(context, haptics, HapticFeedbackType.TextHandleMove)
             onPlayAlbum()
         },
-        modifier = Modifier.width(190.dp),
+        modifier = Modifier
+            .width(190.dp)
+            .height(286.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer
         ),
@@ -1299,7 +1301,7 @@ private fun StreamingAlbumWidgetCard(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -1326,6 +1328,8 @@ private fun StreamingAlbumWidgetCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+
+            Spacer(modifier = Modifier.weight(1f))
 
             album.year?.let { year ->
                 Text(
@@ -2064,8 +2068,6 @@ private fun String.toSourceType(): SourceType {
     return when (this) {
         StreamingServiceId.SUBSONIC -> SourceType.SUBSONIC
         StreamingServiceId.JELLYFIN -> SourceType.JELLYFIN
-        StreamingServiceId.NETEASE_CLOUD_MUSIC -> SourceType.NETEASE_CLOUD_MUSIC
-        StreamingServiceId.QQ_MUSIC -> SourceType.QQ_MUSIC
         else -> SourceType.UNKNOWN
     }
 }

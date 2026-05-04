@@ -17,8 +17,8 @@ android {
         applicationId = "chromahub.rhythm.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 47365978
-        versionName = "4.7.365.978"
+        versionCode = 48370989
+        versionName = "4.8.370.989"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -175,8 +175,8 @@ dependencies {
     
     // Material 3 dependencies
     implementation(platform(libs.androidx.compose.bom))
-    implementation("androidx.compose.material3:material3-android:1.5.0-alpha17")
-    implementation("androidx.compose.material3:material3-window-size-class-android:1.5.0-alpha17")
+    implementation("androidx.compose.material3:material3-android:1.5.0-alpha18")
+    implementation("androidx.compose.material3:material3-window-size-class-android:1.5.0-alpha18")
     implementation("com.google.android.material:material:1.13.0-alpha05")
 
     // Media3 dependencies
@@ -201,7 +201,7 @@ dependencies {
     implementation(libs.androidx.compose.animation.core)
     
     // Navigation
-    implementation("androidx.navigation:navigation-compose:2.9.7")
+    implementation("androidx.navigation:navigation-compose:2.9.8")
     
     // Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.37.3")
@@ -213,8 +213,8 @@ dependencies {
     implementation("androidx.mediarouter:mediarouter:1.8.1")
     
     // Ktor for HTTP server (Cast media serving)
-    implementation("io.ktor:ktor-server-core:3.4.2")
-    implementation("io.ktor:ktor-server-netty:3.4.2")
+    implementation("io.ktor:ktor-server-core:3.4.3")
+    implementation("io.ktor:ktor-server-netty:3.4.3")
     
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
@@ -227,7 +227,7 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     implementation("com.squareup.okhttp3:logging-interceptor:5.3.2")
-    implementation("com.google.code.gson:gson:2.13.2")
+    implementation("com.google.code.gson:gson:2.14.0")
 //    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 //    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
 

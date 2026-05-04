@@ -506,10 +506,19 @@ class RhythmPlayerEngine(
         playerB.stop()
         playerB.clearMediaItems()
 
-        // Release and recreate Player B fresh to avoid OEM stale session bugs
-        playerB.release()
-        playerB = buildPlayer(handleAudioFocus = false)
-        Log.d(TAG, "Old player released and recreated fresh.")
+        // Try to reset Player B for reuse instead of always recreating
+        try {
+            playerB.seekTo(0)
+            playerB.setPlaybackSpeed(1.0f)
+            playerB.setPlaybackParameters(playerB.playbackParameters)
+            Log.d(TAG, "Player B reset for reuse.")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to reset Player B, recreating", e)
+            // Fallback: Release and recreate Player B fresh to avoid OEM stale session bugs
+            playerB.release()
+            playerB = buildPlayer(handleAudioFocus = false)
+            Log.d(TAG, "Old player released and recreated fresh.")
+        }
 
         setPauseAtEndOfMediaItems(false)
     }

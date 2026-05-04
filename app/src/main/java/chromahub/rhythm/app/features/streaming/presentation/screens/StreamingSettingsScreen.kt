@@ -743,8 +743,8 @@ private fun formatListeningDurationShort(durationMs: Long): String {
 
 private data class StreamingQualityOption(
     val value: String,
-    @StringRes val titleRes: Int,
-    @StringRes val descriptionRes: Int
+    @param:StringRes val titleRes: Int,
+    @param:StringRes val descriptionRes: Int
 )
 
 private val streamingQualityOptions = listOf(

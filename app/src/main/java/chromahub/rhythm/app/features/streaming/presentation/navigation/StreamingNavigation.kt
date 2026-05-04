@@ -213,6 +213,11 @@ fun StreamingNavigation(
                 launchSingleTop = true
             }
         }
+
+        streamingMusicViewModel.setSeekHandlers(
+            progressHandler = { progress -> localMusicViewModel.seekTo(progress) },
+            positionHandler = { positionMs -> localMusicViewModel.seekTo(positionMs) }
+        )
     }
 
     LaunchedEffect(hasConnectedService, currentRoute) {
@@ -1081,9 +1086,9 @@ fun StreamingNavigation(
                     onPlayPause = { localMusicViewModel.togglePlayPause() },
                     onSkipNext = { localMusicViewModel.skipToNext() },
                     onSkipPrevious = { localMusicViewModel.skipToPrevious() },
-                    onSeek = { position -> localMusicViewModel.seekTo(position) },
+                    onSeek = { position -> streamingMusicViewModel.seekTo(position) },
                     onLyricsSeek = { lyricPositionMs ->
-                        localMusicViewModel.seekTo(lyricPositionMs.coerceAtLeast(0L))
+                        streamingMusicViewModel.seekTo(lyricPositionMs.coerceAtLeast(0L))
                     },
                     onBack = { navController.popBackStack() },
                     onLocationClick = { localMusicViewModel.showOutputSwitcherDialog() },

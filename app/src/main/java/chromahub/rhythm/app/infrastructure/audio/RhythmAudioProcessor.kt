@@ -16,17 +16,64 @@ import java.nio.ShortBuffer
  * Part of the Rhythm music player's advanced audio processing pipeline.
  */
 @OptIn(UnstableApi::class)
+@Suppress("OVERRIDE_DEPRECATION")
 abstract class RhythmAudioProcessor : AudioProcessor {
     
     companion object {
         private const val TAG = "RhythmAudioProcessor"
+        
+        // Simple buffer pool to reduce allocations
+        private val bufferPool = mutableListOf<ShortArray>()
+        private val byteBufferPool = mutableListOf<ByteBuffer>()
+        private const val MAX_POOL_SIZE = 4
+        
+        fun acquireShortArray(size: Int): ShortArray {
+            synchronized(bufferPool) {
+                val buffer = bufferPool.find { it.size >= size }
+                if (buffer != null) {
+                    bufferPool.remove(buffer)
+                    return buffer
+                }
+            }
+            return ShortArray(size)
+        }
+        
+        fun releaseShortArray(buffer: ShortArray) {
+            synchronized(bufferPool) {
+                if (bufferPool.size < MAX_POOL_SIZE) {
+                    bufferPool.add(buffer)
+                }
+            }
+        }
+        
+        fun acquireByteBuffer(size: Int): ByteBuffer {
+            synchronized(byteBufferPool) {
+                val buffer = byteBufferPool.find { it.capacity() >= size }
+                if (buffer != null) {
+                    byteBufferPool.remove(buffer)
+                    buffer.clear()
+                    return buffer
+                }
+            }
+            return ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+        }
+        
+        fun releaseByteBuffer(buffer: ByteBuffer) {
+            synchronized(byteBufferPool) {
+                if (byteBufferPool.size < MAX_POOL_SIZE) {
+                    buffer.clear()
+                    byteBufferPool.add(buffer)
+                }
+            }
+        }
     }
     
     private var inputAudioFormat: AudioProcessor.AudioFormat = AudioProcessor.AudioFormat.NOT_SET
     private var outputAudioFormat: AudioProcessor.AudioFormat = AudioProcessor.AudioFormat.NOT_SET
+    private var buffer: ByteBuffer = AudioProcessor.EMPTY_BUFFER
+    private var outputBuffer: ByteBuffer = AudioProcessor.EMPTY_BUFFER
     private var inputEnded = false
-    private var outputBuffer: ByteBuffer = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
-    
+
     // Audio format parameters
     protected var sampleRate: Int = 44100
     protected var channelCount: Int = 2
@@ -64,32 +111,43 @@ abstract class RhythmAudioProcessor : AudioProcessor {
     
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!isActive()) {
-            // Pass through unchanged
             outputBuffer = inputBuffer
+            inputBuffer.position(inputBuffer.limit())
             return
         }
         
-        // Process audio samples in-place
-        val position = inputBuffer.position()
-        val samples = ShortArray(inputBuffer.remaining() / 2)
-        inputBuffer.asShortBuffer().get(samples)
+        val size = inputBuffer.remaining()
+        if (buffer.capacity() < size) {
+            buffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+        }
+        buffer.clear()
+        buffer.put(inputBuffer)
+        buffer.flip()
         
-        // Apply audio processing
-        processSamples(samples)
+        val sampleCount = size / 2
+        val samples = acquireShortArray(sampleCount)
+        try {
+            buffer.position(0)
+            buffer.asShortBuffer().get(samples, 0, sampleCount)
+            
+            processSamples(samples)
+            
+            buffer.position(0)
+            buffer.asShortBuffer().put(samples, 0, sampleCount)
+        } finally {
+            releaseShortArray(samples)
+        }
         
-        // Create output buffer
-        val output = ByteBuffer.allocateDirect(samples.size * 2).order(ByteOrder.nativeOrder())
-        output.asShortBuffer().put(samples)
-        output.limit(samples.size * 2)
-        outputBuffer = output
-        
-        inputBuffer.position(position + samples.size * 2)
+        buffer.position(0)
+        buffer.limit(size)
+        outputBuffer = buffer
     }
     
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun getOutput(): ByteBuffer {
-        val buffer = outputBuffer
-        outputBuffer = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
-        return buffer
+        val output = outputBuffer
+        outputBuffer = AudioProcessor.EMPTY_BUFFER
+        return output
     }
     
     override fun queueEndOfStream() {
@@ -98,12 +156,12 @@ abstract class RhythmAudioProcessor : AudioProcessor {
     }
     
     override fun isEnded(): Boolean {
-        return inputEnded && outputBuffer.remaining() == 0
+        return inputEnded && outputBuffer === AudioProcessor.EMPTY_BUFFER
     }
     
     override fun flush() {
         Log.d(TAG, "flush()")
-        outputBuffer = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
+        outputBuffer = AudioProcessor.EMPTY_BUFFER
         inputEnded = false
     }
     

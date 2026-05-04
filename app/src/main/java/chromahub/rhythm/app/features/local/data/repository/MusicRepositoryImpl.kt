@@ -540,6 +540,24 @@ class MusicRepository(context: Context) {
         minimumBitrate: Int = 0,
         minimumDuration: Long = 0L
     ): List<Song> = withContext(Dispatchers.IO) {
+        // Check MediaStore permissions before scanning
+        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Android 13+ requires READ_MEDIA_AUDIO
+            android.content.pm.PackageManager.PERMISSION_GRANTED ==
+            context.checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            // Android 12 and below require READ_EXTERNAL_STORAGE
+            android.content.pm.PackageManager.PERMISSION_GRANTED ==
+            context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        
+        if (!hasPermission) {
+            Log.w(TAG, "MediaStore permission not granted. Cannot scan music library.")
+            // Return empty list with error indication
+            _scanProgress.value = ScanProgress(0, 0, "Permission Denied", 0)
+            return@withContext emptyList()
+        }
+
         val appSettings = AppSettings.getInstance(context)
         var shouldForceRefresh = forceRefresh
 

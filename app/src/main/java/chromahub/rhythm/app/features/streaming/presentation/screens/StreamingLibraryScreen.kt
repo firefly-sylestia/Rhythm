@@ -35,7 +35,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -51,6 +51,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -98,15 +101,15 @@ import chromahub.rhythm.app.util.M3ImageUtils
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-private enum class StreamingLibraryTab(@StringRes val titleRes: Int, val icon: ImageVector) {
+private enum class StreamingLibraryTab(@param:StringRes val titleRes: Int, val icon: ImageVector) {
     SONGS(R.string.library_tab_songs, Icons.Rounded.History),
     ALBUMS(R.string.library_tab_albums, Icons.Rounded.Album),
     ARTISTS(R.string.library_tab_artists, Icons.Rounded.Person),
-    PLAYLISTS(R.string.library_tab_playlists, Icons.Rounded.QueueMusic)
+    PLAYLISTS(R.string.library_tab_playlists, Icons.AutoMirrored.Rounded.QueueMusic)
 }
 
 private enum class StreamingSongSortOrder(
-    @StringRes val labelRes: Int,
+    @param:StringRes val labelRes: Int,
     val ascending: Boolean,
     val icon: ImageVector
 ) {
@@ -121,7 +124,7 @@ private enum class StreamingSongSortOrder(
 }
 
 private enum class StreamingAlbumSortOrder(
-    @StringRes val labelRes: Int,
+    @param:StringRes val labelRes: Int,
     val ascending: Boolean,
     val icon: ImageVector
 ) {
@@ -131,31 +134,31 @@ private enum class StreamingAlbumSortOrder(
     ARTIST_DESC(R.string.sort_artist, false, Icons.Rounded.Person),
     YEAR_ASC(R.string.metadata_year, true, Icons.Rounded.History),
     YEAR_DESC(R.string.metadata_year, false, Icons.Rounded.History),
-    TRACK_COUNT_ASC(R.string.sort_song_count, true, Icons.Rounded.QueueMusic),
-    TRACK_COUNT_DESC(R.string.sort_song_count, false, Icons.Rounded.QueueMusic)
+    TRACK_COUNT_ASC(R.string.sort_song_count, true, Icons.AutoMirrored.Rounded.QueueMusic),
+    TRACK_COUNT_DESC(R.string.sort_song_count, false, Icons.AutoMirrored.Rounded.QueueMusic)
 }
 
 private enum class StreamingArtistSortOrder(
-    @StringRes val labelRes: Int,
+    @param:StringRes val labelRes: Int,
     val ascending: Boolean,
     val icon: ImageVector
 ) {
     NAME_ASC(R.string.sort_name, true, Icons.Rounded.Person),
     NAME_DESC(R.string.sort_name, false, Icons.Rounded.Person),
-    SONG_COUNT_ASC(R.string.sort_song_count, true, Icons.Rounded.QueueMusic),
-    SONG_COUNT_DESC(R.string.sort_song_count, false, Icons.Rounded.QueueMusic),
+    SONG_COUNT_ASC(R.string.sort_song_count, true, Icons.AutoMirrored.Rounded.QueueMusic),
+    SONG_COUNT_DESC(R.string.sort_song_count, false, Icons.AutoMirrored.Rounded.QueueMusic),
     ALBUM_COUNT_DESC(R.string.bottomsheet_albums, false, Icons.Rounded.Album)
 }
 
 private enum class StreamingPlaylistSortOrder(
-    @StringRes val labelRes: Int,
+    @param:StringRes val labelRes: Int,
     val ascending: Boolean,
     val icon: ImageVector
 ) {
-    NAME_ASC(R.string.sort_name, true, Icons.Rounded.QueueMusic),
-    NAME_DESC(R.string.sort_name, false, Icons.Rounded.QueueMusic),
-    TRACK_COUNT_ASC(R.string.sort_song_count, true, Icons.Rounded.QueueMusic),
-    TRACK_COUNT_DESC(R.string.sort_song_count, false, Icons.Rounded.QueueMusic)
+    NAME_ASC(R.string.sort_name, true, Icons.AutoMirrored.Rounded.QueueMusic),
+    NAME_DESC(R.string.sort_name, false, Icons.AutoMirrored.Rounded.QueueMusic),
+    TRACK_COUNT_ASC(R.string.sort_song_count, true, Icons.AutoMirrored.Rounded.QueueMusic),
+    TRACK_COUNT_DESC(R.string.sort_song_count, false, Icons.AutoMirrored.Rounded.QueueMusic)
 }
 
 @Composable
@@ -401,6 +404,8 @@ fun StreamingLibraryScreen(
             context.getString(R.string.library_title)
         }
     }
+    val pullToRefreshState = rememberPullToRefreshState()
+    val isRefreshing = isLoading
 
     val openAlbumBottomSheet: (StreamingAlbum) -> Unit = { album ->
         selectedAlbum = album
@@ -597,15 +602,30 @@ fun StreamingLibraryScreen(
                 }
             }
 
-            Surface(
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { viewModel.loadLibrary() },
+                state = pullToRefreshState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .padding(start = 20.dp, top = 4.dp, end = 20.dp, bottom = 14.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shadowElevation = 0.dp
+                    .weight(1f),
+                indicator = {
+                    PullToRefreshDefaults.LoadingIndicator(
+                        state = pullToRefreshState,
+                        isRefreshing = isRefreshing,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
             ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxSize()
+                        .padding(start = 20.dp, top = 4.dp, end = 20.dp, bottom = 14.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shadowElevation = 0.dp
+                ) {
                 if (!isSelectedServiceConnected) {
                     Box(
                         modifier = Modifier
@@ -824,6 +844,7 @@ fun StreamingLibraryScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -1075,7 +1096,7 @@ private fun StreamingPlaylistsTabPage(
         } else if (playlists.isEmpty()) {
             item {
                 StreamingLibraryEmptyCard(
-                    icon = Icons.Rounded.QueueMusic,
+                    icon = Icons.AutoMirrored.Rounded.QueueMusic,
                     title = stringResource(id = R.string.library_no_playlists),
                     subtitle = stringResource(id = R.string.streaming_home_widget_empty_hint)
                 )
