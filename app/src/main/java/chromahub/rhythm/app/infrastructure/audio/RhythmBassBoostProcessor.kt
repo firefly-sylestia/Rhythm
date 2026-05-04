@@ -117,7 +117,7 @@ class RhythmBassBoostProcessor : RhythmAudioProcessor() {
         return limited
     }
     
-    override fun processSamples(samples: ShortArray) {
+    override fun processSamples(samples: ShortArray, sampleCount: Int) {
         if (!enabled || strength == 0.toShort()) {
             return // Pass through unchanged for maximum efficiency
         }
@@ -139,7 +139,7 @@ class RhythmBassBoostProcessor : RhythmAudioProcessor() {
         val isStereo = channelCount == 2
         
         // Process each sample with the IIR filter
-        for (i in samples.indices) {
+        for (i in 0 until sampleCount) {
             val channelIdx = if (isStereo) i % 2 else 0
             
             // Convert to normalized float (-1.0 to 1.0)

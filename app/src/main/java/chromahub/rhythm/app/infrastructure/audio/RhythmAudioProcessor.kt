@@ -82,8 +82,9 @@ abstract class RhythmAudioProcessor : AudioProcessor {
     /**
      * Process audio samples in-place using custom DSP algorithm
      * @param samples Array of audio samples (16-bit PCM)
+     * @param sampleCount Number of valid samples in the array
      */
-    abstract fun processSamples(samples: ShortArray)
+    abstract fun processSamples(samples: ShortArray, sampleCount: Int)
     
     /**
      * Check if the processor is enabled
@@ -111,8 +112,14 @@ abstract class RhythmAudioProcessor : AudioProcessor {
     
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!isActive()) {
-            outputBuffer = inputBuffer
-            inputBuffer.position(inputBuffer.limit())
+            val size = inputBuffer.remaining()
+            if (buffer.capacity() < size) {
+                buffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+            }
+            buffer.clear()
+            buffer.put(inputBuffer)
+            buffer.flip()
+            outputBuffer = buffer
             return
         }
         
@@ -130,7 +137,7 @@ abstract class RhythmAudioProcessor : AudioProcessor {
             buffer.position(0)
             buffer.asShortBuffer().get(samples, 0, sampleCount)
             
-            processSamples(samples)
+            processSamples(samples, sampleCount)
             
             buffer.position(0)
             buffer.asShortBuffer().put(samples, 0, sampleCount)

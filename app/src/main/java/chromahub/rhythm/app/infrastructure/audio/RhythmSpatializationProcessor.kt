@@ -61,7 +61,7 @@ class RhythmSpatializationProcessor : RhythmAudioProcessor() {
      */
     fun isAvailable(): Boolean = channelCount == 2
     
-    override fun processSamples(samples: ShortArray) {
+    override fun processSamples(samples: ShortArray, sampleCount: Int) {
         if (!enabled || strength == 0.toShort() || channelCount != 2) {
             return // Only works for stereo, pass through otherwise
         }
@@ -76,7 +76,7 @@ class RhythmSpatializationProcessor : RhythmAudioProcessor() {
         }
         
         // Process stereo pairs (L, R, L, R, ...)
-        for (i in 0 until samples.size step 2) {
+        for (i in 0 until sampleCount - 1 step 2) {
             // Convert to normalized float (-1.0 to 1.0)
             val left = samples[i] / 32768.0f
             val right = samples[i + 1] / 32768.0f
