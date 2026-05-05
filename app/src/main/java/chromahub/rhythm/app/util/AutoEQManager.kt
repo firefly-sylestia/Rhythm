@@ -1,4 +1,4 @@
-package chromahub.rhythm.app.utils
+package chromahub.rhythm.app.util
 
 import android.content.Context
 import chromahub.rhythm.app.shared.data.model.AutoEQDatabase

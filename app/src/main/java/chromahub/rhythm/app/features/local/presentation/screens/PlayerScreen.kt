@@ -704,18 +704,12 @@ fun PlayerScreen(
         label = "swipeOffset"
     )
     
-    // Calculate swipe-based transformations for mini-player-like effect
-    val swipeProgress = (animatedSwipeOffset / screenHeight).coerceIn(0f, 1f)
+    // Calculate swipe-based transformations for mini-player-like effect (moved to graphicsLayer to prevent recomposition loops)
     val swipeDismissThreshold = screenHeight * 0.16f
     
-    // Enhanced scale that creates a "collapsing to mini player" effect
-    val swipeScale = 1f - (swipeProgress * 0.10f)
-    
-    // Alpha fades more gradually for smoother transition
-    val swipeAlpha = 1f - (swipeProgress * 0.42f)
-    
-    // Corner radius increases as we swipe down (mini player has more rounded corners)
-    val swipeCornerRadius = (swipeProgress * 26f).dp
+    // Derived states for visibility to prevent recomposition loops
+    val showSwipeIndicator by remember { derivedStateOf { swipeOffsetY > 16f } }
+    val isPastThreshold by remember { derivedStateOf { swipeOffsetY > swipeDismissThreshold } }
 
     // Calculate current and total time
     val currentTimeMs = ((song?.duration ?: 0) * progress).toLong()
@@ -1150,6 +1144,11 @@ fun PlayerScreen(
         },
         screenModifier = Modifier
             .graphicsLayer {
+                val swipeProgress = (animatedSwipeOffset / screenHeight).coerceIn(0f, 1f)
+                val swipeScale = 1f - (swipeProgress * 0.10f)
+                val swipeAlpha = 1f - (swipeProgress * 0.42f)
+                val swipeCornerRadius = (swipeProgress * 26f).dp
+
                 // Apply swipe transitions to the whole scaffold so header and content dismiss together.
                 alpha = swipeAlpha
                 translationY = animatedSwipeOffset
@@ -1179,7 +1178,8 @@ fun PlayerScreen(
                             // Only allow downward swipes
                             if (dragAmount > 0) {
                                 change.consume()
-                                val dragResistance = (1f - (swipeProgress * 0.35f)).coerceAtLeast(0.55f)
+                                val currentSwipeProgress = (swipeOffsetY / screenHeight).coerceIn(0f, 1f)
+                                val dragResistance = (1f - (currentSwipeProgress * 0.35f)).coerceAtLeast(0.55f)
                                 swipeOffsetY = (swipeOffsetY + dragAmount * dragResistance).coerceIn(0f, dismissTargetOffset)
                                 velocityTracker = (dragAmount * 0.55f) + (velocityTracker * 0.45f)
                             }
@@ -1295,7 +1295,7 @@ fun PlayerScreen(
         ) {
             // Enhanced swipe indicator with progress feedback
             AnimatedVisibility(
-                visible = swipeOffsetY > 16f,
+                visible = showSwipeIndicator,
                 enter = fadeIn() + slideInVertically { -it },
                 exit = fadeOut() + slideOutVertically { -it },
                 modifier = Modifier
@@ -1308,7 +1308,7 @@ fun PlayerScreen(
                 ) {
                     Surface(
                         shape = RoundedCornerShape(20.dp),
-                        color = if (swipeOffsetY > swipeDismissThreshold) {
+                        color = if (isPastThreshold) {
                             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
                         } else {
                             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
@@ -1316,11 +1316,11 @@ fun PlayerScreen(
                         tonalElevation = 2.dp
                     ) {
                         Text(
-                            text = if (swipeOffsetY > swipeDismissThreshold) "Release to close" else "Swipe down to close",
+                            text = if (isPastThreshold) "Release to close" else "Swipe down to close",
                             style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = if (swipeOffsetY > swipeDismissThreshold) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (isPastThreshold) FontWeight.Bold else FontWeight.Normal
                             ),
-                            color = if (swipeOffsetY > swipeDismissThreshold) {
+                            color = if (isPastThreshold) {
                                 MaterialTheme.colorScheme.onPrimaryContainer
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -1342,7 +1342,7 @@ fun PlayerScreen(
                                 .fillMaxHeight()
                                 .fillMaxWidth((swipeOffsetY / swipeDismissThreshold).coerceIn(0f, 1f))
                                 .background(
-                                    if (swipeOffsetY > swipeDismissThreshold) {
+                                    if (isPastThreshold) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
                                         MaterialTheme.colorScheme.secondary
@@ -1499,14 +1499,15 @@ fun PlayerScreen(
                                 .fillMaxWidth(if (isTablet) 1.0f else albumArtFraction) // Responsive size based on screen dimensions
                                 .aspectRatio(1f)
                                 .graphicsLayer {
+                                    val currentSwipeProgress = (animatedSwipeOffset / screenHeight).coerceIn(0f, 1f)
                                     // Album art scales and shrinks during swipe (mini-player effect)
-                                    val combinedScale = albumScale * (1f - swipeProgress * 0.2f)
+                                    val combinedScale = albumScale * (1f - currentSwipeProgress * 0.2f)
                                     scaleX = combinedScale
                                     scaleY = combinedScale
-                                    alpha = albumAlpha * (1f - swipeProgress * 0.3f)
+                                    alpha = albumAlpha * (1f - currentSwipeProgress * 0.3f)
                                     
                                     // Move upward slightly as if collapsing to mini player position
-                                    translationY = -swipeProgress * 100f
+                                    translationY = -currentSwipeProgress * 100f
                                     
                                     // Apply horizontal translation for track swipe and track change animation
                                     translationX = artworkTranslationX + albumSlideOffset
@@ -2286,6 +2287,7 @@ fun PlayerScreen(
                             .fillMaxWidth()
                             .graphicsLayer {
                                 // Fade out controls as we swipe down (mini-player doesn't show full controls)
+                                val swipeProgress = (animatedSwipeOffset / screenHeight).coerceIn(0f, 1f)
                                 alpha = 1f - (swipeProgress * 1.2f)
                                 translationY = swipeProgress * 50f
                             }

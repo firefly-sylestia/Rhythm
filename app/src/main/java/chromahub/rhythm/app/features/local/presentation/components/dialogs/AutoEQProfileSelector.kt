@@ -126,35 +126,41 @@ fun AutoEQProfileSelector(
     }
     
     // Filtered profiles based on search and filters
-    val filteredProfiles = remember(profiles, searchQuery, selectedBrand, selectedType, currentAutoEQProfile) {
-        var filtered = profiles
-        
-        if (searchQuery.isNotBlank()) {
-            val query = searchQuery.lowercase()
-            filtered = filtered.filter { 
-                it.name.lowercase().contains(query) ||
-                it.brand.lowercase().contains(query)
+    var filteredProfiles by remember { mutableStateOf(emptyList<AutoEQProfile>()) }
+    
+    LaunchedEffect(profiles, searchQuery, selectedBrand, selectedType, currentAutoEQProfile) {
+        filteredProfiles = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            var filtered = profiles
+            
+            if (searchQuery.isNotBlank()) {
+                val query = searchQuery.lowercase()
+                filtered = filtered.filter { 
+                    it.name.lowercase().contains(query) ||
+                    it.brand.lowercase().contains(query)
+                }
             }
+            
+            if (selectedBrand != null) {
+                filtered = filtered.filter { it.brand == selectedBrand }
+            }
+            
+            if (selectedType != null) {
+                filtered = filtered.filter { it.type == selectedType }
+            }
+            
+            // Sort active profile to the top
+            filtered.sortedWith(compareByDescending { it.name == currentAutoEQProfile })
         }
-        
-        if (selectedBrand != null) {
-            filtered = filtered.filter { it.brand == selectedBrand }
-        }
-        
-        if (selectedType != null) {
-            filtered = filtered.filter { it.type == selectedType }
-        }
-        
-        // Sort active profile to the top
-        filtered.sortedWith(compareByDescending { it.name == currentAutoEQProfile })
     }
     
-    val brands = remember(profiles) {
-        profiles.map { it.brand }.distinct().sorted()
-    }
-    
-    val types = remember(profiles) {
-        profiles.map { it.type }.distinct().sorted()
+    var brands by remember { mutableStateOf(emptyList<String>()) }
+    var types by remember { mutableStateOf(emptyList<String>()) }
+
+    LaunchedEffect(profiles) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            brands = profiles.map { it.brand }.distinct().sorted()
+            types = profiles.map { it.type }.distinct().sorted()
+        }
     }
 
     ModalBottomSheet(

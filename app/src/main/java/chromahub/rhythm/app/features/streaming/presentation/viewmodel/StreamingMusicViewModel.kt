@@ -777,7 +777,14 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
     /**
      * Skip to next song.
      */
+    private var lastSkipTime = 0L
+    private val SKIP_DEBOUNCE_MS = 400L
+
     fun skipToNext() {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastSkipTime < SKIP_DEBOUNCE_MS) return
+        lastSkipTime = currentTime
+
         val currentIndex = _queue.value.indexOf(_currentSong.value)
         if (currentIndex >= 0 && currentIndex < _queue.value.size - 1) {
             playSong(_queue.value[currentIndex + 1])
@@ -788,6 +795,10 @@ class StreamingMusicViewModel(application: Application) : AndroidViewModel(appli
      * Skip to previous song.
      */
     fun skipToPrevious() {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastSkipTime < SKIP_DEBOUNCE_MS) return
+        lastSkipTime = currentTime
+
         val currentIndex = _queue.value.indexOf(_currentSong.value)
         if (currentIndex > 0) {
             playSong(_queue.value[currentIndex - 1])

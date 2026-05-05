@@ -111,10 +111,15 @@ abstract class RhythmAudioProcessor : AudioProcessor {
     }
     
     override fun queueInput(inputBuffer: ByteBuffer) {
+        if (!inputBuffer.hasRemaining()) {
+            return
+        }
+        
         if (!isActive()) {
             val size = inputBuffer.remaining()
             if (buffer.capacity() < size) {
-                buffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+                if (buffer !== AudioProcessor.EMPTY_BUFFER) releaseByteBuffer(buffer)
+                buffer = acquireByteBuffer(size)
             }
             buffer.clear()
             buffer.put(inputBuffer)
@@ -125,7 +130,8 @@ abstract class RhythmAudioProcessor : AudioProcessor {
         
         val size = inputBuffer.remaining()
         if (buffer.capacity() < size) {
-            buffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+            if (buffer !== AudioProcessor.EMPTY_BUFFER) releaseByteBuffer(buffer)
+            buffer = acquireByteBuffer(size)
         }
         buffer.clear()
         buffer.put(inputBuffer)

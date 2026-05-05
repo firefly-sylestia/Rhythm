@@ -18,6 +18,9 @@ import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
+import chromahub.rhythm.app.shared.data.model.AutoEQDatabase
+import chromahub.rhythm.app.shared.data.model.AutoEQProfile
+import chromahub.rhythm.app.util.AutoEQManager
 import android.util.LruCache
 import androidx.core.app.NotificationCompat
 import androidx.core.net.toUri
@@ -156,7 +159,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val statusBroadcaster = StatusBroadcaster(application)
     
     // AutoEQ manager
-    private val autoEQManager = chromahub.rhythm.app.utils.AutoEQManager(application)
+    private val autoEQManager = AutoEQManager(application)
     
     // Queue state manager
     private val queueStateHolder = QueueStateHolder()
@@ -4979,7 +4982,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var lastSkipTime = 0L
+    private val SKIP_DEBOUNCE_MS = 400L
+
     fun skipToNext() {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastSkipTime < SKIP_DEBOUNCE_MS) {
+            Log.d(TAG, "Ignored skipToNext: debouncing rapid clicks.")
+            return
+        }
+        lastSkipTime = currentTime
+
         Log.d(TAG, "Skip to next")
         mediaController?.let { controller ->
             // Check if there are more songs in the queue
@@ -5023,6 +5036,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToPrevious() {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastSkipTime < SKIP_DEBOUNCE_MS) {
+            Log.d(TAG, "Ignored skipToPrevious: debouncing rapid clicks.")
+            return
+        }
+        lastSkipTime = currentTime
+
         Log.d(TAG, "Skip to previous")
         mediaController?.let { controller ->
             // If current position is past the threshold, restart current song
@@ -8506,12 +8526,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _autoEQLoading.value = true
             try {
-                val result = autoEQManager.loadProfiles()
-                result.onSuccess { database ->
+                val result: Result<AutoEQDatabase> = autoEQManager.loadProfiles()
+                if (result.isSuccess) {
+                    val database = result.getOrNull()!!
                     _autoEQProfiles.value = database.profiles
                     Log.d(TAG, "Loaded ${database.profiles.size} AutoEQ profiles")
-                }.onFailure { error ->
-                    Log.e(TAG, "Failed to load AutoEQ profiles", error)
+                } else {
+                    Log.e(TAG, "Failed to load AutoEQ profiles", result.exceptionOrNull())
                 }
             } finally {
                 _autoEQLoading.value = false
@@ -8605,7 +8626,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         
         // Apply AutoEQ profile if the device has one configured
         if (device.autoEQProfileName != null) {
-            val profile = autoEQManager.findProfileByName(device.autoEQProfileName)
+            val profile: AutoEQProfile? = autoEQManager.findProfileByName(device.autoEQProfileName)
             if (profile != null) {
                 applyAutoEQProfile(profile)
                 Log.d(TAG, "Applied AutoEQ profile for device: ${device.autoEQProfileName}")

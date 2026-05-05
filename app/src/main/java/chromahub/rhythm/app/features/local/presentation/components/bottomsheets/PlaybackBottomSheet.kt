@@ -177,7 +177,7 @@ fun PlaybackBottomSheet(
     }
     
     // Monitor system volume changes using ContentObserver (no polling)
-    DisposableEffect(Unit) {
+    LaunchedEffect(Unit) {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val volumeObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
@@ -195,7 +195,9 @@ fun PlaybackBottomSheet(
             true,
             volumeObserver
         )
-        onDispose {
+        try {
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
             context.contentResolver.unregisterContentObserver(volumeObserver)
         }
     }

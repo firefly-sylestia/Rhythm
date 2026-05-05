@@ -118,13 +118,17 @@ class RhythmSpatializationProcessor : RhythmAudioProcessor() {
         val absValue = kotlin.math.abs(x)
         
         // Check if we're already in linear region
-        if (absValue <= 1f) {
+        val threshold = 0.8f
+        if (absValue <= threshold) {
             return x
         }
         
         // In compression region: apply smooth saturation
-        // Using: y = sign(x) * (1.0 - 1.0/(1.0 + abs(x)))
-        val limited = kotlin.math.sign(x) * (1f - 1f / (1f + absValue))
-        return limited
+        // Gracefully transitions from linear to an asymptote of 1.0
+        val over = absValue - threshold
+        val maxOver = 1.0f - threshold
+        val limited = threshold + over / (1.0f + over / maxOver)
+        
+        return kotlin.math.sign(x) * limited
     }
 }

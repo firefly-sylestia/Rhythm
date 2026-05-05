@@ -107,14 +107,18 @@ class RhythmBassBoostProcessor : RhythmAudioProcessor() {
         val absValue = kotlin.math.abs(sample)
         
         // Check if we're in linear region (no limiting needed)
-        if (absValue <= 1f) {
+        val threshold = 0.8f
+        if (absValue <= threshold) {
             return sample
         }
         
-        // In compression region: apply soft-knee limiting
-        // Using: y = sign(x) * (1.0 - 1.0/(1.0 + abs(x)))
-        val limited = kotlin.math.sign(sample) * (1f - 1f / (1f + absValue))
-        return limited
+        // In compression region: apply soft-knee limiting to prevent hard clipping
+        // Gracefully transitions from linear to an asymptote of 1.0
+        val over = absValue - threshold
+        val maxOver = 1.0f - threshold
+        val limited = threshold + over / (1.0f + over / maxOver)
+        
+        return kotlin.math.sign(sample) * limited
     }
     
     override fun processSamples(samples: ShortArray, sampleCount: Int) {

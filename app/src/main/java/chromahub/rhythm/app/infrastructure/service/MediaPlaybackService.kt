@@ -1060,6 +1060,10 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     // See: infrastructure/service/player/RhythmPlayerEngine.kt
     // See: infrastructure/service/player/TransitionController.kt
 
+    // Skip debounce state for widget actions
+    private var lastServiceSkipTime = 0L
+    private val SERVICE_SKIP_DEBOUNCE_MS = 400L
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "Service started with command: ${intent?.action}")
         
@@ -1114,9 +1118,9 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                 val strength = intent.getShortExtra("strength", 0)
                 Log.d(TAG, "Received intent to set bass boost - enabled: $enabled, strength: $strength")
                 
-                if (rhythmBassBoostProcessor == null && player.audioSessionId != 0) {
+                if (rhythmBassBoostProcessor == null) {
                     Log.d(TAG, "Rhythm bass boost processor is null, attempting initialization")
-                    initializeAudioEffects()
+                    initializeRhythmProcessors()
                 }
                 
                 setBassBoostEnabled(enabled)
@@ -1127,9 +1131,9 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                 val strength = intent.getShortExtra("strength", 0)
                 Log.d(TAG, "Received intent to set virtualizer - enabled: $enabled, strength: $strength")
                 
-                if (rhythmSpatializationProcessor == null && player.audioSessionId != 0) {
+                if (rhythmSpatializationProcessor == null) {
                     Log.d(TAG, "Rhythm spatialization processor is null, attempting initialization")
-                    initializeAudioEffects()
+                    initializeRhythmProcessors()
                 }
                 
                 setVirtualizerEnabled(enabled)
@@ -1175,20 +1179,28 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             }
             ACTION_SKIP_NEXT -> {
                 Log.d(TAG, "Widget skip next action")
-                player.seekToNext()
-                // Update widget immediately after action
-                serviceScope.launch {
-                    kotlinx.coroutines.delay(100) // Small delay for track change
-                    updateWidgetFromMediaItem(player.currentMediaItem)
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastServiceSkipTime >= SERVICE_SKIP_DEBOUNCE_MS) {
+                    lastServiceSkipTime = currentTime
+                    player.seekToNext()
+                    // Update widget immediately after action
+                    serviceScope.launch {
+                        kotlinx.coroutines.delay(100) // Small delay for track change
+                        updateWidgetFromMediaItem(player.currentMediaItem)
+                    }
                 }
             }
             ACTION_SKIP_PREVIOUS -> {
                 Log.d(TAG, "Widget skip previous action")
-                player.seekToPrevious()
-                // Update widget immediately after action
-                serviceScope.launch {
-                    kotlinx.coroutines.delay(100) // Small delay for track change
-                    updateWidgetFromMediaItem(player.currentMediaItem)
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastServiceSkipTime >= SERVICE_SKIP_DEBOUNCE_MS) {
+                    lastServiceSkipTime = currentTime
+                    player.seekToPrevious()
+                    // Update widget immediately after action
+                    serviceScope.launch {
+                        kotlinx.coroutines.delay(100) // Small delay for track change
+                        updateWidgetFromMediaItem(player.currentMediaItem)
+                    }
                 }
             }
             ACTION_TOGGLE_FAVORITE -> {
@@ -1914,7 +1926,34 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         }
     }
     
+    private fun initializeRhythmProcessors() {
+        if (rhythmBassBoostProcessor == null) {
+            Log.w(TAG, "Rhythm bass boost processor is null, creating new instance")
+            try {
+                rhythmBassBoostProcessor = chromahub.rhythm.app.infrastructure.audio.RhythmBassBoostProcessor()
+                isBassBoostAvailable = true
+                appSettings.setBassBoostAvailable(true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create bass boost processor", e)
+                isBassBoostAvailable = false
+                appSettings.setBassBoostAvailable(false)
+            }
+        }
+        
+        if (rhythmSpatializationProcessor == null) {
+            Log.w(TAG, "Rhythm spatialization processor is null, creating new instance")
+            try {
+                rhythmSpatializationProcessor = chromahub.rhythm.app.infrastructure.audio.RhythmSpatializationProcessor()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create spatialization processor", e)
+            }
+        }
+    }
+
     fun initializeAudioEffects() {
+        // Initialize Rhythm processors unconditionally, they don't need session IDs
+        initializeRhythmProcessors()
+
         val requestedSessionId = try {
             player.audioSessionId
         } catch (e: Exception) {
@@ -1983,31 +2022,8 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             }
 
             // Initialize Rhythm audio processors (replaces Android BassBoost and Spatializer)
-            // Processors are already created in onCreate(), just load their settings here
+            // Processors are created unconditionally now, just load their settings here
             Log.d(TAG, "Loading Rhythm processor settings")
-
-            // Ensure processors are available (they should be created in onCreate)
-            if (rhythmBassBoostProcessor == null) {
-                Log.w(TAG, "Rhythm bass boost processor is null, creating new instance")
-                try {
-                    rhythmBassBoostProcessor = chromahub.rhythm.app.infrastructure.audio.RhythmBassBoostProcessor()
-                    isBassBoostAvailable = true
-                    appSettings.setBassBoostAvailable(true)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to create bass boost processor", e)
-                    isBassBoostAvailable = false
-                    appSettings.setBassBoostAvailable(false)
-                }
-            }
-
-            if (rhythmSpatializationProcessor == null) {
-                Log.w(TAG, "Rhythm spatialization processor is null, creating new instance")
-                try {
-                    rhythmSpatializationProcessor = chromahub.rhythm.app.infrastructure.audio.RhythmSpatializationProcessor()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to create spatialization processor", e)
-                }
-            }
 
             // Load saved settings and apply them
             loadSavedAudioEffects()
@@ -2026,28 +2042,27 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     
     private fun loadSavedAudioEffects() {
         try {
-            // Verify equalizer is available before loading settings
-            if (equalizer == null) {
-                Log.w(TAG, "Cannot load saved audio effects: equalizer is null")
-                return
-            }
-            
-            val shouldBeEnabled = appSettings.equalizerEnabled.value
-            Log.d(TAG, "Loading saved effects - EQ should be enabled: $shouldBeEnabled")
-            
-            // Load band levels (supports both 5-band legacy and 10-band)
-            val bandLevelsString = appSettings.equalizerBandLevels.value
-            val bandLevels = bandLevelsString.split(",").mapNotNull { it.toFloatOrNull() }
-            if (bandLevels.isNotEmpty()) {
-                // Apply band levels first, then enable
-                // Use the same interpolation logic as applyEqualizerPreset
-                applyEqualizerPreset(bandLevels.toFloatArray())
-            }
-            
-            // Enable equalizer AFTER applying levels to avoid audio glitches
-            val actualState = setEqualizerEnabledSafe(shouldBeEnabled)
-            if (actualState != shouldBeEnabled) {
-                Log.e(TAG, "EQ state mismatch after load! Expected: $shouldBeEnabled, Actual: $actualState")
+            // Load saved settings and apply them to equalizer if available
+            if (equalizer != null) {
+                val shouldBeEnabled = appSettings.equalizerEnabled.value
+                Log.d(TAG, "Loading saved effects - EQ should be enabled: $shouldBeEnabled")
+                
+                // Load band levels (supports both 5-band legacy and 10-band)
+                val bandLevelsString = appSettings.equalizerBandLevels.value
+                val bandLevels = bandLevelsString.split(",").mapNotNull { it.toFloatOrNull() }
+                if (bandLevels.isNotEmpty()) {
+                    // Apply band levels first, then enable
+                    // Use the same interpolation logic as applyEqualizerPreset
+                    applyEqualizerPreset(bandLevels.toFloatArray())
+                }
+                
+                // Enable equalizer AFTER applying levels to avoid audio glitches
+                val actualState = setEqualizerEnabledSafe(shouldBeEnabled)
+                if (actualState != shouldBeEnabled) {
+                    Log.e(TAG, "EQ state mismatch after load! Expected: $shouldBeEnabled, Actual: $actualState")
+                }
+            } else {
+                Log.w(TAG, "Cannot load saved equalizer settings: equalizer is null")
             }
             
             // Load Rhythm bass boost settings
@@ -2197,23 +2212,29 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                 val inputBands = levels.size
                 
                 if (inputBands == numberOfBands) {
+                    val bandRange = eq.bandLevelRange
                     // Direct mapping if bands match
                     for (i in 0 until numberOfBands) {
-                        val level = (levels[i] * 100).toInt().toShort()
+                        val rawLevel = (levels[i] * 100).toInt().toShort()
+                        val level = rawLevel.coerceIn(bandRange[0], bandRange[1])
                         eq.setBandLevel(i.toShort(), level)
                     }
                 } else if (inputBands > numberOfBands) {
+                    val bandRange = eq.bandLevelRange
                     // Map 10 UI bands to available hardware bands using interpolation
                     // This handles the case where UI has 10 bands but hardware has 5
                     val mappedLevels = interpolateBands(levels, numberOfBands)
                     for (i in 0 until numberOfBands) {
-                        val level = (mappedLevels[i] * 100).toInt().toShort()
+                        val rawLevel = (mappedLevels[i] * 100).toInt().toShort()
+                        val level = rawLevel.coerceIn(bandRange[0], bandRange[1])
                         eq.setBandLevel(i.toShort(), level)
                     }
                 } else {
+                    val bandRange = eq.bandLevelRange
                     // If hardware has more bands than UI, apply what we have
                     for (i in 0 until inputBands) {
-                        val level = (levels[i] * 100).toInt().toShort()
+                        val rawLevel = (levels[i] * 100).toInt().toShort()
+                        val level = rawLevel.coerceIn(bandRange[0], bandRange[1])
                         eq.setBandLevel(i.toShort(), level)
                     }
                 }
