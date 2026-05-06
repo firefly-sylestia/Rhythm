@@ -76,9 +76,4 @@ jobs:
           prerelease: ${{ steps.prerelease.outputs.value }}
           generate_release_notes: true
           files: |
-            app/build/outputs/apk/github/release/Rhythm-*-github-*-release.apk
-            app/build/outputs/apk/github/release/Rhythm-*-github-*-release.apk.sha256
-            app/build/outputs/apk/github/release/Rhythm-*-github-*-release.apk.md5
-            app/build/outputs/apk/fdroid/release/Rhythm-*-fdroid-*-release.apk
-            app/build/outputs/apk/fdroid/release/Rhythm-*-fdroid-*-release.apk.sha256
-            app/build/outputs/apk/fdroid/release/Rhythm-*-fdroid-*-release.apk.md5
+            app/build/outputs/apk/github/release/Rhythm-*-github-*-release.apk          
