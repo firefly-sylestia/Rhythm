@@ -5348,6 +5348,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * Replaces the player timeline with [newQueue] in a single setMediaItems call,
      * preserving the currently playing song and its position. This is O(1) IPC calls
      * versus O(n) for reorderQueueInPlace, making it suitable for large queue shuffles.
+     *
+     * When the currently playing song is still present in [newQueue], we use
+     * [androidx.media3.common.Player.replaceMediaItems] to swap out the items
+     * before/after the current item without ever touching the currently playing
+     * item. This avoids the brief "stop and re-buffer" pause that would otherwise
+     * happen with [androidx.media3.common.Player.setMediaItems] when toggling
+     * shuffle on or off.
      */
     private fun replacePlayerQueue(player: androidx.media3.common.Player, newQueue: List<Song>, currentSongId: String?, currentPosition: Long) {
         val wasPlaying = player.isPlaying
@@ -5370,6 +5377,58 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .build()
         }
 
+        // Try to swap the queue WITHOUT disturbing the currently playing item.
+        // This keeps audio rolling continuously when the user toggles shuffle.
+        val currentPlayerIndex = player.currentMediaItemIndex
+        val currentPlayerCount = player.mediaItemCount
+        val currentPlayerMediaId = player.currentMediaItem?.mediaId
+        val canPreserveCurrent = currentSongId != null
+            && currentPlayerMediaId == currentSongId
+            && currentPlayerCount > 0
+            && currentPlayerIndex in 0 until currentPlayerCount
+            && targetIndex in mediaItems.indices
+
+        if (canPreserveCurrent) {
+            try {
+                // 1) Replace items AFTER the current one first. Indices below
+                //    `currentPlayerIndex` are untouched by this call so the
+                //    currently playing item keeps its index and source.
+                val futureItems = if (targetIndex + 1 < mediaItems.size) {
+                    mediaItems.subList(targetIndex + 1, mediaItems.size)
+                } else {
+                    emptyList()
+                }
+                if (currentPlayerIndex + 1 <= currentPlayerCount) {
+                    player.replaceMediaItems(
+                        currentPlayerIndex + 1,
+                        currentPlayerCount,
+                        futureItems
+                    )
+                }
+
+                // 2) Replace items BEFORE the current one. The current item is
+                //    never re-prepared so audio doesn't stop.
+                val historyItems = if (targetIndex > 0) {
+                    mediaItems.subList(0, targetIndex)
+                } else {
+                    emptyList()
+                }
+                if (currentPlayerIndex > 0 || historyItems.isNotEmpty()) {
+                    player.replaceMediaItems(0, currentPlayerIndex, historyItems)
+                }
+
+                if (wasPlaying && !player.isPlaying) {
+                    player.play()
+                }
+                Log.d(TAG, "Replaced queue seamlessly (size=${mediaItems.size}, currentIndex=$targetIndex)")
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Seamless queue replace failed, falling back to setMediaItems", e)
+            }
+        }
+
+        // Fallback: full timeline reset (will cause a brief reload of the
+        // current item, but only when the current song is missing/changed).
         player.setMediaItems(mediaItems, targetIndex, currentPosition)
         if (wasPlaying && !player.isPlaying) {
             player.play()

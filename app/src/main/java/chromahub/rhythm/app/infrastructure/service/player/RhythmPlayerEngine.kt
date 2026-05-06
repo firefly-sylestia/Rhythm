@@ -193,8 +193,17 @@ class RhythmPlayerEngine(
     }
 
     private fun buildPlayer(handleAudioFocus: Boolean): ExoPlayer {
+        // Tuned for local audio playback: keep a healthy 15s/30s buffer ahead, but
+        // require only a small amount of buffered audio to (re)start playback so
+        // that seeks (skip 10s, scrubber drag), track switches and shuffle toggles
+        // resume virtually instantly instead of stalling for ~1.5-2.5s.
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 30_000, 1_500, 2_500)
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 15_000,
+                /* maxBufferMs = */ 30_000,
+                /* bufferForPlaybackMs = */ 250,
+                /* bufferForPlaybackAfterRebufferMs = */ 500
+            )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
