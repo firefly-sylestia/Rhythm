@@ -59,16 +59,22 @@ android {
     }
 
     val signingProperties = getProperties(".config/keystore.properties")
-    val releaseSigning = if (signingProperties != null) {
-        signingConfigs.create("release") {
-            keyAlias = signingProperties.property("key_alias")
-            keyPassword = signingProperties.property("key_password")
-            storePassword = signingProperties.property("store_password")
-            storeFile = rootProject.file(signingProperties.property("store_file"))
+val releaseSigning = if (signingProperties != null) {
+    signingConfigs.create("release") {
+        val storeFilePath = signingProperties.property("store_file")
+        
+        keyAlias = signingProperties.property("key_alias")
+        keyPassword = signingProperties.property("key_password")
+        storePassword = signingProperties.property("store_password")
+        
+        // Only set storeFile if the path is valid (not a placeholder like "store_file missing")
+        if (!storeFilePath.endsWith(" missing")) {
+            storeFile = rootProject.file(storeFilePath)
         }
-    } else {
-        signingConfigs.getByName("debug")
     }
+} else {
+    signingConfigs.getByName("debug")
+}
 
     defaultConfig {
     }
